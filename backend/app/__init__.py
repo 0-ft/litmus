@@ -1,2 +1,2 @@
-# Biomon - Biosecurity Paper Monitor
+# Litmus - Biosecurity Research Paper Risk Scanner
 

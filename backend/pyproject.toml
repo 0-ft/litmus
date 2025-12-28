@@ -1,7 +1,7 @@
 [project]
-name = "biomon"
+name = "litmus"
 version = "0.1.0"
-description = "Biosecurity Research Paper Monitor"
+description = "Biosecurity Research Paper Risk Scanner"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

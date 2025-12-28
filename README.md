@@ -1,6 +1,6 @@
-# Biomon - Biosecurity Research Paper Monitor
+# Litmus - Biosecurity Research Paper Risk Scanner
 
-A system for scanning biology research papers and assessing them for biosecurity risks using AI analysis.
+AI-powered screening of biology research papers for biosecurity risks. Like a litmus test for dangerous research.
 
 ## Features
 
@@ -148,7 +148,7 @@ biomon/
 │   │   └── lib/              # API client, utilities
 │   └── package.json
 ├── data/
-│   └── biomon.db             # SQLite database
+│   └── litmus.db             # SQLite database
 └── docker-compose.yml
 ```
 

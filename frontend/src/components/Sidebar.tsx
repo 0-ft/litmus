@@ -34,8 +34,8 @@ export function Sidebar() {
               <ShieldAlert className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-foreground">Biomon</h1>
-              <p className="text-xs text-muted-foreground">Biosecurity Monitor</p>
+              <h1 className="text-lg font-semibold text-foreground">Litmus</h1>
+              <p className="text-xs text-muted-foreground">Biosecurity Scanner</p>
             </div>
           </div>
         </div>
@@ -74,7 +74,7 @@ export function Sidebar() {
         <div className="border-t border-border p-4">
           <div className="rounded-lg bg-muted/50 p-3">
             <p className="text-xs text-muted-foreground">
-              Monitoring biology research papers for biosecurity risks using AI analysis.
+              AI-powered screening of biology research for biosecurity risks.
             </p>
           </div>
         </div>

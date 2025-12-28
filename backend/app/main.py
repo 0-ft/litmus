@@ -7,8 +7,8 @@ from .api import papers, assessments, facilities, scan
 
 # Create FastAPI app
 app = FastAPI(
-    title="Biomon",
-    description="Biosecurity Research Paper Monitor - Scans biology papers for biosecurity risk assessment",
+    title="Litmus",
+    description="Biosecurity Research Paper Risk Scanner - AI-powered screening of biology papers for biosecurity concerns",
     version="0.1.0",
 )
 
@@ -53,8 +53,8 @@ async def shutdown_event():
 async def root():
     """Root endpoint."""
     return {
-        "name": "Biomon",
-        "description": "Biosecurity Research Paper Monitor",
+        "name": "Litmus",
+        "description": "Biosecurity Research Paper Risk Scanner",
         "version": "0.1.0",
         "docs": "/docs",
     }

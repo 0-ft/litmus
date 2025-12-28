@@ -9,7 +9,7 @@ from .config import settings, DATA_DIR
 DATA_DIR.mkdir(exist_ok=True)
 
 # SQLite database path
-DB_PATH = DATA_DIR / "biomon.db"
+DB_PATH = DATA_DIR / "litmus.db"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # Create engine with SQLite-specific settings

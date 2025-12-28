@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""  # For web search (facility research)
     
     # Database
-    database_url: str = "sqlite:///data/biomon.db"
+    database_url: str = "sqlite:///data/litmus.db"
     
     # Scanning settings
     scan_interval_hours: int = 24
