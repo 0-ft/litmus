@@ -12,8 +12,10 @@ from ..config import settings
 class ArxivScraper:
     """Scraper for fetching biology papers from arXiv."""
     
-    # Biology-related arXiv categories
+    # BROAD category list - biased toward recall (false positives OK)
+    # LLM assessment will filter out irrelevant papers
     BIOLOGY_CATEGORIES = [
+        # Core biology
         "q-bio.BM",  # Biomolecules
         "q-bio.CB",  # Cell Behavior
         "q-bio.GN",  # Genomics
@@ -26,26 +28,53 @@ class ArxivScraper:
         "q-bio.TO",  # Tissues and Organs
     ]
     
-    # Biosecurity-relevant search terms
+    # Adjacent categories that may contain biosecurity-relevant work
+    ADJACENT_CATEGORIES = [
+        "cs.LG",      # Machine Learning (protein design, etc.)
+        "cs.AI",      # AI (dual-use AI/bio)
+        "cs.CL",      # Computation and Language (LLM + bio)
+        "physics.bio-ph",  # Biological Physics
+        "physics.soc-ph",  # Social Physics (epidemiology models)
+        "stat.ML",    # Machine Learning
+        "cond-mat.soft",   # Soft matter (virus structure)
+    ]
+    
+    # BROAD search terms - err on side of catching too much
+    # Better to have false positives than miss something
     BIOSECURITY_TERMS = [
-        "pathogen",
-        "virus",
-        "bacterial",
-        "infectious disease",
-        "gain of function",
-        "transmissibility",
-        "virulence",
-        "biosafety",
-        "synthetic biology",
-        "genome editing",
-        "CRISPR",
-        "pandemic",
-        "outbreak",
-        "bioweapon",
-        "dual use",
-        "select agent",
-        "BSL",
-        "containment",
+        # Direct biosecurity terms
+        "pathogen", "virus", "viral", "bacterial", "bacteria",
+        "infectious disease", "infection", "contagious",
+        "gain of function", "gain-of-function",
+        "transmissibility", "transmission", "airborne", "aerosol",
+        "virulence", "pathogenicity", "lethality",
+        "biosafety", "biosecurity", "biodefense",
+        "pandemic", "epidemic", "outbreak", "endemic",
+        "bioweapon", "biological weapon", "dual use", "dual-use",
+        "select agent", "BSL", "containment", "quarantine",
+        # Techniques that could be dual-use
+        "synthetic biology", "genome editing", "gene editing",
+        "CRISPR", "cas9", "cas12", "cas13",
+        "directed evolution", "serial passage", "adaptation",
+        "reverse genetics", "recombinant", "chimeric",
+        "protein engineering", "enzyme engineering",
+        # Specific pathogens/threats
+        "influenza", "coronavirus", "SARS", "MERS", "COVID",
+        "ebola", "marburg", "smallpox", "variola", "anthrax",
+        "plague", "yersinia", "botulinum", "ricin",
+        "H5N1", "H7N9", "avian flu", "bird flu",
+        "hemorrhagic fever", "encephalitis",
+        # Enhancement-related
+        "enhanced", "enhancement", "increased", "improved",
+        "fitness", "replication", "host range", "tropism",
+        "immune evasion", "antibody escape", "vaccine escape",
+        # Lab/research context
+        "laboratory", "lab-acquired", "biosafety level",
+        "high containment", "maximum containment",
+        # AI + bio intersection
+        "protein design", "de novo protein", "protein generation",
+        "sequence generation", "generative model",
+        "AlphaFold", "ESM", "language model",
     ]
     
     def __init__(self, db: Session):
@@ -79,19 +108,26 @@ class ArxivScraper:
         self,
         max_results: int = 100,
         days_back: int = 7,
+        include_adjacent: bool = True,
     ) -> List[Paper]:
         """
-        Search for papers in biology categories.
+        Search for papers in biology + adjacent categories.
+        Biased toward RECALL - better to catch too much than miss something.
         
         Args:
             max_results: Maximum number of papers to fetch
             days_back: How many days back to search
+            include_adjacent: Also search CS/physics categories
             
         Returns:
             List of Paper objects (not yet committed to DB)
         """
-        # Build category query
-        category_query = " OR ".join([f"cat:{cat}" for cat in self.BIOLOGY_CATEGORIES])
+        # Build category query - include all relevant categories
+        categories = self.BIOLOGY_CATEGORIES.copy()
+        if include_adjacent:
+            categories.extend(self.ADJACENT_CATEGORIES)
+        
+        category_query = " OR ".join([f"cat:{cat}" for cat in categories])
         
         search = arxiv.Search(
             query=category_query,
@@ -115,13 +151,16 @@ class ArxivScraper:
         self,
         terms: Optional[List[str]] = None,
         max_results: int = 50,
+        restrict_to_categories: bool = False,  # Default: search ALL of arXiv
     ) -> List[Paper]:
         """
         Search for papers using biosecurity-relevant terms.
+        Biased toward RECALL - searches across ALL arXiv by default.
         
         Args:
             terms: Search terms (defaults to BIOSECURITY_TERMS)
             max_results: Maximum number of papers per term
+            restrict_to_categories: If False, search all of arXiv (more recall)
             
         Returns:
             List of Paper objects (not yet committed to DB)
@@ -133,9 +172,15 @@ class ArxivScraper:
         seen_ids = set()
         
         for term in terms:
-            # Combine term with biology categories
-            category_filter = " OR ".join([f"cat:{cat}" for cat in self.BIOLOGY_CATEGORIES])
-            query = f"({term}) AND ({category_filter})"
+            # By default, DON'T restrict to categories - cast wide net
+            # The LLM assessment will filter out irrelevant papers
+            if restrict_to_categories:
+                all_cats = self.BIOLOGY_CATEGORIES + self.ADJACENT_CATEGORIES
+                category_filter = " OR ".join([f"cat:{cat}" for cat in all_cats])
+                query = f"({term}) AND ({category_filter})"
+            else:
+                # Search ALL of arXiv for this term
+                query = term
             
             search = arxiv.Search(
                 query=query,

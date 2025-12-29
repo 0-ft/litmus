@@ -15,22 +15,64 @@ from ..config import settings
 
 
 class PubmedScraper:
-    """Scraper for fetching papers from PubMed via NCBI Entrez."""
+    """Scraper for fetching papers from PubMed via NCBI Entrez.
     
-    # Biosecurity-relevant search terms
+    DESIGN: Biased toward RECALL (false positives OK).
+    Broad search terms to catch anything potentially relevant.
+    LLM assessment filters out irrelevant papers.
+    """
+    
+    # BROAD search queries - err on side of catching too much
     SEARCH_QUERIES = [
+        # Direct biosecurity
         "pathogen research",
-        "gain of function virus",
+        "gain of function",
+        "gain-of-function",
         "viral transmissibility",
         "infectious disease laboratory",
-        "synthetic biology pathogen",
         "biosafety level",
         "select agent",
         "pandemic preparedness",
-        "viral evolution",
-        "bat coronavirus",
-        "influenza transmissibility",
         "biodefense",
+        "biosecurity",
+        "dual use research",
+        # Specific pathogens
+        "influenza transmission",
+        "coronavirus research",
+        "bat coronavirus",
+        "SARS-CoV",
+        "MERS-CoV",
+        "avian influenza",
+        "H5N1",
+        "H7N9",
+        "Ebola virus",
+        "hemorrhagic fever",
+        "smallpox variola",
+        "anthrax bacillus",
+        # Techniques
+        "synthetic biology",
+        "genome editing pathogen",
+        "CRISPR virus",
+        "directed evolution virus",
+        "serial passage",
+        "reverse genetics virus",
+        "recombinant virus",
+        "chimeric virus",
+        # Enhancement-related
+        "viral evolution",
+        "host adaptation virus",
+        "immune evasion",
+        "antibody escape",
+        "drug resistance pathogen",
+        # Broad catches
+        "virology laboratory",
+        "high containment",
+        "BSL-3",
+        "BSL-4",
+        # AI + bio
+        "machine learning protein design",
+        "deep learning virus",
+        "generative model protein",
     ]
     
     def __init__(self, db: Session):
@@ -41,7 +83,7 @@ class PubmedScraper:
             raise ImportError("Biopython is required for PubMed scraping. Install with: pip install biopython")
         
         # Set up Entrez
-        Entrez.email = "biomon@example.com"  # Required by NCBI
+        Entrez.email = "litmus@example.com"  # Required by NCBI
         if settings.ncbi_api_key:
             Entrez.api_key = settings.ncbi_api_key
     

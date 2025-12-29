@@ -10,24 +10,26 @@ from ..config import settings
 
 
 class BiorxivScraper:
-    """Scraper for fetching papers from bioRxiv and medRxiv."""
+    """Scraper for fetching papers from bioRxiv and medRxiv.
+    
+    DESIGN: Biased toward RECALL (false positives OK).
+    We fetch ALL papers and let the LLM assessment filter relevance.
+    """
     
     BASE_URL = "https://api.biorxiv.org"
     
-    # Biosecurity-relevant subject areas
-    RELEVANT_SUBJECTS = [
+    # Note: We DON'T filter by subject anymore - grab everything
+    # LLM assessment will determine relevance
+    # This list is kept for reference/logging only
+    HIGH_PRIORITY_SUBJECTS = [
         "microbiology",
-        "infectious diseases",
+        "infectious diseases", 
         "synthetic biology",
         "genomics",
-        "molecular biology",
         "pathology",
         "immunology",
         "epidemiology",
-        "genetics",
-        "bioinformatics",
-        "cell biology",
-        "biochemistry",
+        "virology",
     ]
     
     def __init__(self, db: Session):
@@ -126,15 +128,12 @@ class BiorxivScraper:
                 if self._paper_exists(doi):
                     continue
                 
-                # Filter by relevant subjects
-                category = result.get("category", "").lower()
-                is_relevant = any(subj in category for subj in self.RELEVANT_SUBJECTS)
+                # NO FILTERING - grab ALL papers
+                # Biased toward recall - LLM assessment will filter relevance
+                papers.append(self._result_to_paper(result, server))
                 
-                if is_relevant or not category:  # Include if no category or if relevant
-                    papers.append(self._result_to_paper(result, server))
-                    
-                    if len(papers) >= max_results:
-                        break
+                if len(papers) >= max_results:
+                    break
             
             # Move to next page
             cursor += len(collection)
