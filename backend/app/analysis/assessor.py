@@ -234,6 +234,32 @@ class BiosecurityAssessor:
         Returns:
             Assessment model instance (committed to DB), or None if assessment fails
         """
+        # For PubMed papers, try to enrich with PMC full text (extracts BSL info)
+        pmc_bsl_info = None  # Track BSL info for prompt even if not persisted
+        if paper.source == "pubmed":
+            try:
+                from ..scrapers.pubmed import fetch_pmc_fulltext, extract_bsl_from_text
+                # Only fetch if we don't already have BSL info
+                if not paper.full_text or "BSL_DETECTED" not in paper.full_text:
+                    logger.info(f"Attempting to fetch PMC full text for paper {paper.id}...")
+                    pmc_content = fetch_pmc_fulltext(paper.external_id)
+                    if pmc_content:
+                        bsl_level, bsl_context = extract_bsl_from_text(pmc_content)
+                        if bsl_level:
+                            logger.info(f"Found {bsl_level} in PMC full text for paper {paper.id}")
+                            pmc_bsl_info = f"BSL_DETECTED: {bsl_level}\nBSL_CONTEXT: {bsl_context}"
+                            # Try to persist to DB
+                            try:
+                                paper.full_text = (paper.full_text or "") + f"\n\n{pmc_bsl_info}"
+                                self.db.add(paper)
+                                self.db.commit()
+                                self.db.refresh(paper)
+                            except Exception as db_err:
+                                logger.warning(f"Could not persist PMC data: {db_err}")
+                                # Still use the info for assessment even if not persisted
+            except Exception as e:
+                logger.warning(f"Error fetching PMC content for paper {paper.id}: {e}")
+        
         # Auto-research facilities mentioned in the paper (from affiliations, abstract, etc.)
         if self.facility_researcher:
             try:
@@ -249,6 +275,9 @@ class BiosecurityAssessor:
             # Truncate if too long
             text = paper.full_text[:15000] if len(paper.full_text) > 15000 else paper.full_text
             full_text_section = f"**Full Text (excerpt)**:\n{text}"
+        elif pmc_bsl_info:
+            # Use PMC BSL info even if not persisted
+            full_text_section = f"**From Full Text (PMC)**:\n{pmc_bsl_info}"
         
         facility_context = self._get_facility_context(paper)
         

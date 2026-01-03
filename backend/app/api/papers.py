@@ -18,7 +18,9 @@ class PaperResponse(BaseModel):
     external_id: str
     title: str
     authors: str
+    affiliations: Optional[str]
     abstract: Optional[str]
+    full_text: Optional[str]
     url: Optional[str]
     published_date: Optional[datetime]
     fetched_at: datetime

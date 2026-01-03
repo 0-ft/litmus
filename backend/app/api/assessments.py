@@ -163,8 +163,10 @@ async def get_assessment(assessment_id: int, db: Session = Depends(get_db)):
 
 @router.get("/paper/{paper_id}", response_model=List[AssessmentResponse])
 async def get_paper_assessments(paper_id: int, db: Session = Depends(get_db)):
-    """Get all assessments for a paper."""
-    assessments = db.query(Assessment).filter(Assessment.paper_id == paper_id).all()
+    """Get all assessments for a paper, ordered by most recent first."""
+    assessments = db.query(Assessment).filter(
+        Assessment.paper_id == paper_id
+    ).order_by(Assessment.assessed_at.desc()).all()
     return assessments
 
 
