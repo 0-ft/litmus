@@ -25,18 +25,19 @@ IMPORTANT: Only report BSL levels that are explicitly stated in search results. 
 # JSON Schema for facility research structured output
 FACILITY_RESEARCH_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
-        "found": {"type": "boolean", "description": "Whether facility information was found"},
-        "official_name": {"type": ["string", "null"], "description": "Full official name of the facility"},
-        "aliases": {"type": "array", "items": {"type": "string"}, "description": "Known abbreviations or alternate names"},
-        "country": {"type": ["string", "null"], "description": "Country where facility is located"},
-        "city": {"type": ["string", "null"], "description": "City where facility is located"},
-        "bsl_level": {"type": ["integer", "null"], "minimum": 1, "maximum": 4, "description": "BSL level if explicitly stated"},
-        "notes": {"type": ["string", "null"], "description": "Brief factual notes about the facility"},
-        "source_urls": {"type": "array", "items": {"type": "string"}, "description": "URLs where info was found"},
-        "confidence": {"type": "string", "enum": ["high", "medium", "low"], "description": "Confidence in the extracted information"}
+        "found": {"type": "boolean"},
+        "official_name": {"type": "string"},
+        "aliases": {"type": "array", "items": {"type": "string"}},
+        "country": {"type": "string"},
+        "city": {"type": "string"},
+        "bsl_level": {"type": "integer"},
+        "notes": {"type": "string"},
+        "source_urls": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
     },
-    "required": ["found", "aliases", "source_urls", "confidence"]
+    "required": ["found", "official_name", "aliases", "country", "city", "bsl_level", "notes", "source_urls", "confidence"]
 }
 
 
@@ -146,11 +147,7 @@ class FacilityResearcher:
                 extra_body={
                     "output_format": {
                         "type": "json_schema",
-                        "json_schema": {
-                            "name": "facility_research",
-                            "schema": FACILITY_RESEARCH_SCHEMA,
-                            "strict": True
-                        }
+                        "schema": FACILITY_RESEARCH_SCHEMA
                     }
                 }
             )
@@ -221,20 +218,16 @@ Return the facility names found."""
                 extra_body={
                     "output_format": {
                         "type": "json_schema",
-                        "json_schema": {
-                            "name": "facility_extraction",
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "facilities": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                        "description": "List of facility/institution names found"
-                                    }
-                                },
-                                "required": ["facilities"]
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "facilities": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                }
                             },
-                            "strict": True
+                            "required": ["facilities"]
                         }
                     }
                 }

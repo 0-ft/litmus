@@ -2,7 +2,7 @@
 import json
 import logging
 import sys
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
@@ -52,11 +52,13 @@ Provide your biosecurity risk analysis."""
 # JSON Schema for structured output
 ASSESSMENT_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "pathogen_analysis": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "score": {"type": "integer"},
                 "pathogens_identified": {"type": "array", "items": {"type": "string"}},
                 "rationale": {"type": "string"}
             },
@@ -64,8 +66,9 @@ ASSESSMENT_SCHEMA = {
         },
         "gof_analysis": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "score": {"type": "integer"},
                 "indicators_found": {"type": "array", "items": {"type": "string"}},
                 "rationale": {"type": "string"}
             },
@@ -73,8 +76,9 @@ ASSESSMENT_SCHEMA = {
         },
         "containment_analysis": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "score": {"type": "integer"},
                 "concerns": {"type": "array", "items": {"type": "string"}},
                 "rationale": {"type": "string"}
             },
@@ -82,8 +86,9 @@ ASSESSMENT_SCHEMA = {
         },
         "dual_use_analysis": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "score": {"type": "integer"},
                 "concerns": {"type": "array", "items": {"type": "string"}},
                 "rationale": {"type": "string"}
             },
@@ -91,6 +96,7 @@ ASSESSMENT_SCHEMA = {
         },
         "overall_assessment": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "risk_summary": {"type": "string"},
                 "key_concerns": {"type": "array", "items": {"type": "string"}},
@@ -100,6 +106,7 @@ ASSESSMENT_SCHEMA = {
         },
         "extracted_entities": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "facilities": {"type": "array", "items": {"type": "string"}},
                 "pathogens": {"type": "array", "items": {"type": "string"}},
@@ -180,12 +187,13 @@ class BiosecurityAssessor:
         
         return round(overall, 2)
     
-    def assess_paper(self, paper: Paper) -> Optional[Assessment]:
+    def assess_paper(self, paper: Paper, progress_callback: Optional[Callable[[str, Dict], None]] = None) -> Optional[Assessment]:
         """
         Assess a paper for biosecurity risks using Claude.
         
         Args:
             paper: Paper model instance to assess
+            progress_callback: Optional callback for progress updates
             
         Returns:
             Assessment model instance (committed to DB), or None if assessment fails
@@ -230,16 +238,46 @@ class BiosecurityAssessor:
                 extra_body={
                     "output_format": {
                         "type": "json_schema",
-                        "json_schema": {
-                            "name": "biosecurity_assessment",
-                            "schema": ASSESSMENT_SCHEMA,
-                            "strict": True
-                        }
+                        "schema": ASSESSMENT_SCHEMA
                     }
                 }
             )
             
             # Parse response - guaranteed valid JSON with structured outputs
+            logger.info(f"Claude response for paper {paper.id}: content length={len(response.content)}, stop_reason={response.stop_reason}")
+            
+            # Handle model refusal
+            if response.stop_reason == "refusal" or not response.content:
+                logger.warning(f"Claude refused to assess paper {paper.id} - may contain sensitive content")
+                # Create a placeholder assessment for refused papers
+                assessment = Assessment(
+                    paper_id=paper.id,
+                    risk_grade="F",  # Flag as needing manual review
+                    overall_score=100,  # Max score to ensure visibility
+                    pathogen_score=0,
+                    gof_score=0,
+                    containment_score=0,
+                    dual_use_score=0,
+                    rationale=json.dumps({"error": "Model refused to assess - manual review required"}),
+                    concerns_summary="AI model refused to analyze this paper. May contain sensitive biosecurity content requiring manual review.",
+                    pathogens_identified=None,
+                    flagged=True,
+                    flag_reason="Model refused assessment - requires manual expert review",
+                )
+                self.db.add(assessment)
+                paper.processed = True
+                self.db.commit()
+                self.db.refresh(assessment)
+                
+                if progress_callback:
+                    progress_callback("paper_refused", {
+                        "paper_id": paper.id,
+                        "title": paper.title,
+                        "message": "Model refused to assess - flagged for manual review"
+                    })
+                
+                return assessment
+            
             response_text = response.content[0].text
             logger.info(f"Claude response received for paper {paper.id}, parsing JSON...")
             analysis = json.loads(response_text)
