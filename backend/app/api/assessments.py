@@ -28,6 +28,9 @@ class AssessmentResponse(BaseModel):
     flag_reason: Optional[str]
     assessed_at: datetime
     model_version: Optional[str]
+    # Debug/trace fields
+    input_prompt: Optional[str] = None
+    raw_output: Optional[str] = None
 
     class Config:
         from_attributes = True
