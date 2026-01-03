@@ -2,10 +2,10 @@
 import json
 import httpx
 from typing import Optional, Dict, Any, List
-from anthropic import Anthropic
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..llm import get_llm_client
 from ..models import Facility
 
 
@@ -47,7 +47,7 @@ class FacilityResearcher:
     def __init__(self, db: Session):
         """Initialize researcher with database session."""
         self.db = db
-        self.client = Anthropic(api_key=settings.anthropic_api_key)
+        self.llm = get_llm_client()
         self.http_client = httpx.Client(timeout=30.0)
     
     def search_web(self, query: str, num_results: int = 5) -> List[Dict[str, Any]]:
@@ -131,9 +131,7 @@ class FacilityResearcher:
         
         # Use LLM with structured output to extract facility information
         try:
-            response = self.client.messages.create(
-                model=settings.claude_model,
-                max_tokens=1024,
+            response = self.llm.complete(
                 messages=[{
                     "role": "user",
                     "content": FACILITY_RESEARCH_PROMPT.format(
@@ -141,18 +139,16 @@ class FacilityResearcher:
                         search_results=search_text,
                     )
                 }],
-                extra_headers={
-                    "anthropic-beta": "structured-outputs-2025-11-13"
-                },
-                extra_body={
-                    "output_format": {
-                        "type": "json_schema",
-                        "schema": FACILITY_RESEARCH_SCHEMA
-                    }
-                }
+                max_tokens=1024,
+                json_schema=FACILITY_RESEARCH_SCHEMA,
             )
             
-            result = json.loads(response.content[0].text)
+            # Handle potential refusals
+            if not response["text"] or response["stop_reason"] == "refusal":
+                print(f"Model refused or returned empty response for facility: {facility_name}")
+                return None
+            
+            result = json.loads(response["text"])
             
             if not result.get("found"):
                 return None
@@ -187,53 +183,95 @@ class FacilityResearcher:
             print(f"Error researching facility {facility_name}: {e}")
             return None
     
-    def research_facilities_from_text(self, text: str) -> List[Dict[str, Any]]:
+    def research_facilities_from_paper(self, paper) -> List[Dict[str, Any]]:
         """
-        Extract and research facility names from paper text.
+        Extract and research facility names from paper metadata.
+        
+        Looks in (priority order):
+        1. Author affiliations (most reliable)
+        2. Abstract text
+        3. Full text if available
         
         Args:
-            text: Paper abstract or full text
+            paper: Paper model instance
+            
+        Returns:
+            List of researched facility information
+        """
+        # Build combined text from all sources
+        text_parts = []
+        
+        # Priority 1: Affiliations (most reliable source)
+        if paper.affiliations:
+            try:
+                affiliations = json.loads(paper.affiliations)
+                if affiliations:
+                    text_parts.append("Author Affiliations:\n" + "\n".join(affiliations))
+            except:
+                pass
+        
+        # Priority 2: Abstract
+        if paper.abstract:
+            text_parts.append("Abstract:\n" + paper.abstract)
+        
+        # Priority 3: Full text (first 5000 chars)
+        if paper.full_text:
+            text_parts.append("Full text excerpt:\n" + paper.full_text[:5000])
+        
+        if not text_parts:
+            return []
+        
+        combined_text = "\n\n".join(text_parts)
+        return self.research_facilities_from_text(combined_text)
+    
+    def research_facilities_from_text(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Extract and research facility names from text.
+        
+        Args:
+            text: Combined paper text (affiliations, abstract, etc.)
             
         Returns:
             List of researched facility information
         """
         # Use LLM with structured output to extract facility names
         try:
-            response = self.client.messages.create(
-                model=settings.claude_model,
-                max_tokens=1024,
+            facility_extraction_schema = {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "facilities": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                },
+                "required": ["facilities"]
+            }
+            
+            response = self.llm.complete(
+                system="""You are helping a biosecurity monitoring system identify research facilities for containment verification purposes. 
+This is legitimate defensive work to help ensure proper biosafety practices in published research.
+Your task is simply to extract organization names from text - this helps biosecurity professionals verify appropriate containment levels.""",
                 messages=[{
                     "role": "user",
-                    "content": f"""Extract names of research institutions, laboratories, or facilities mentioned in this text.
-Only extract organizations that appear to be conducting the research.
+                    "content": f"""Extract the names of research institutions, universities, or laboratories from this text.
+We need to identify facilities to verify they have appropriate biosafety containment for the research described.
 
-Text:
+Text from a published research paper:
 {text[:5000]}
 
-Return the facility names found."""
+List the organization/institution names found."""
                 }],
-                extra_headers={
-                    "anthropic-beta": "structured-outputs-2025-11-13"
-                },
-                extra_body={
-                    "output_format": {
-                        "type": "json_schema",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "facilities": {
-                                    "type": "array",
-                                    "items": {"type": "string"}
-                                }
-                            },
-                            "required": ["facilities"]
-                        }
-                    }
-                }
+                max_tokens=1024,
+                json_schema=facility_extraction_schema,
             )
             
-            result = json.loads(response.content[0].text)
+            # Handle potential refusals
+            if not response["text"] or response["stop_reason"] == "refusal":
+                print(f"Model refused or returned empty response for facility extraction")
+                return []
+            
+            result = json.loads(response["text"])
             facility_names = result.get("facilities", [])
             
             # Research each facility

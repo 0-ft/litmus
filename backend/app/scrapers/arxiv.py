@@ -98,11 +98,22 @@ class ArxivScraper:
     
     def _result_to_paper(self, result: arxiv.Result) -> Paper:
         """Convert arXiv result to Paper model."""
+        # Extract author names
+        authors = [str(a) for a in result.authors]
+        
+        # Try to extract affiliations (arxiv Author objects may have these)
+        affiliations = set()
+        for author in result.authors:
+            # Check if author object has affiliation attribute
+            if hasattr(author, 'affiliation') and author.affiliation:
+                affiliations.add(author.affiliation)
+        
         return Paper(
             source="arxiv",
             external_id=result.entry_id.split("/")[-1],  # Extract arXiv ID
             title=result.title,
-            authors=json.dumps([str(a) for a in result.authors]),
+            authors=json.dumps(authors),
+            affiliations=json.dumps(list(affiliations)) if affiliations else None,
             abstract=result.summary,
             url=result.entry_id,
             pdf_url=result.pdf_url,

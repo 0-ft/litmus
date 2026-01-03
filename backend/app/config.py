@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     
     # API Keys
     anthropic_api_key: str = ""
+    openrouter_api_key: str = ""  # For OpenRouter (alternative LLM provider)
     ncbi_api_key: str = ""  # For PubMed higher rate limits
     tavily_api_key: str = ""  # For web search (facility research)
     
@@ -21,8 +22,10 @@ class Settings(BaseSettings):
     # Risk thresholds
     high_risk_threshold: int = 70  # Papers scoring above this get flagged
     
-    # Claude model
-    claude_model: str = "claude-sonnet-4-5-20250929"
+    # LLM Configuration
+    llm_provider: str = "anthropic"  # "anthropic" or "openrouter"
+    llm_model: str = "claude-sonnet-4-5-20250929"  # Model name (provider-specific)
+    # OpenRouter models: "anthropic/claude-3.5-sonnet", "google/gemini-pro-1.5", "meta-llama/llama-3.1-70b-instruct", etc.
     
     # Facility research
     auto_research_facilities: bool = True  # Auto-research facilities mentioned in papers

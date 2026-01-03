@@ -128,15 +128,25 @@ class PubmedScraper:
             if not title:
                 return None
             
-            # Get authors
+            # Get authors and affiliations
             author_list = article.get("AuthorList", [])
             authors = []
+            affiliations = set()  # Use set to deduplicate
             for author in author_list:
                 last = author.get("LastName", "")
                 first = author.get("ForeName", "")
                 if last:
                     authors.append(f"{first} {last}".strip())
+                
+                # Extract affiliations
+                affiliation_info = author.get("AffiliationInfo", [])
+                for aff in affiliation_info:
+                    aff_text = aff.get("Affiliation", "")
+                    if aff_text:
+                        affiliations.add(aff_text)
+            
             authors_json = json.dumps(authors)
+            affiliations_json = json.dumps(list(affiliations)) if affiliations else None
             
             # Get abstract
             abstract_parts = article.get("Abstract", {}).get("AbstractText", [])
@@ -191,6 +201,7 @@ class PubmedScraper:
                 external_id=pmid,
                 title=title,
                 authors=authors_json,
+                affiliations=affiliations_json,
                 abstract=abstract,
                 url=url,
                 pdf_url=None,

@@ -29,6 +29,7 @@ class Paper(Base):
     # Paper metadata
     title = Column(Text, nullable=False)
     authors = Column(Text, nullable=False)  # JSON array of author names
+    affiliations = Column(Text, nullable=True)  # JSON array of institutional affiliations
     abstract = Column(Text, nullable=True)
     full_text = Column(Text, nullable=True)  # If available
     

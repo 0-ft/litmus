@@ -1,13 +1,13 @@
-"""Claude-based biosecurity risk assessor."""
+"""LLM-based biosecurity risk assessor."""
 import json
 import logging
 import sys
 from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime
-from anthropic import Anthropic
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..llm import get_llm_client
 from ..models import Paper, Assessment, Facility, ExtractedEntity
 from .criteria import RiskCriteria
 from ..research import FacilityResearcher
@@ -147,13 +147,12 @@ ASSESSMENT_SCHEMA = {
 
 
 class BiosecurityAssessor:
-    """Assesses research papers for biosecurity risks using Claude."""
+    """Assesses research papers for biosecurity risks using LLM."""
     
     def __init__(self, db: Session):
         """Initialize assessor with database session."""
         self.db = db
-        self.client = Anthropic(api_key=settings.anthropic_api_key)
-        self.model = settings.claude_model
+        self.llm = get_llm_client()
         self.facility_researcher = FacilityResearcher(db) if settings.auto_research_facilities else None
     
     def _get_facility_context(self, paper: Paper) -> str:
@@ -235,10 +234,10 @@ class BiosecurityAssessor:
         Returns:
             Assessment model instance (committed to DB), or None if assessment fails
         """
-        # Auto-research facilities mentioned in the paper
-        if self.facility_researcher and paper.abstract:
+        # Auto-research facilities mentioned in the paper (from affiliations, abstract, etc.)
+        if self.facility_researcher:
             try:
-                self.facility_researcher.research_facilities_from_text(paper.abstract)
+                self.facility_researcher.research_facilities_from_paper(paper)
             except Exception as e:
                 print(f"Facility research error for paper {paper.id}: {e}")
         
@@ -262,38 +261,29 @@ class BiosecurityAssessor:
         )
         
         try:
-            # Call Claude with structured output
-            logger.info(f"Calling Claude for paper {paper.id}: {paper.title[:50]}...")
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=ASSESSMENT_SYSTEM_PROMPT,
+            # Call LLM with structured output
+            logger.info(f"Calling {self.llm.provider}/{self.llm.model} for paper {paper.id}: {paper.title[:50]}...")
+            response = self.llm.complete(
                 messages=[{"role": "user", "content": user_prompt}],
-                extra_headers={
-                    "anthropic-beta": "structured-outputs-2025-11-13"
-                },
-                extra_body={
-                    "output_format": {
-                        "type": "json_schema",
-                        "schema": ASSESSMENT_SCHEMA
-                    }
-                }
+                system=ASSESSMENT_SYSTEM_PROMPT,
+                max_tokens=4096,
+                json_schema=ASSESSMENT_SCHEMA,
             )
-            
-            # Parse response - guaranteed valid JSON with structured outputs
-            logger.info(f"Claude response for paper {paper.id}: content length={len(response.content)}, stop_reason={response.stop_reason}")
             
             # Build full input for debug trace
             full_input = {
                 "system": ASSESSMENT_SYSTEM_PROMPT,
                 "user": user_prompt,
-                "model": self.model,
+                "model": f"{self.llm.provider}/{self.llm.model}",
                 "output_format": "json_schema (structured outputs)"
             }
             
+            # Parse response
+            logger.info(f"LLM response for paper {paper.id}: text length={len(response['text'])}, stop_reason={response['stop_reason']}")
+            
             # Handle model refusal
-            if response.stop_reason == "refusal" or not response.content:
-                logger.warning(f"Claude refused to assess paper {paper.id} - may contain sensitive content")
+            if response["stop_reason"] == "refusal" or not response["text"]:
+                logger.warning(f"Model refused to assess paper {paper.id} - may contain sensitive content")
                 # Create a placeholder assessment for refused papers
                 assessment = Assessment(
                     paper_id=paper.id,
@@ -308,7 +298,7 @@ class BiosecurityAssessor:
                     pathogens_identified=None,
                     flagged=True,
                     flag_reason="Model refused assessment - requires manual expert review",
-                    model_version=self.model,
+                    model_version=f"{self.llm.provider}/{self.llm.model}",
                     input_prompt=json.dumps(full_input),
                     raw_output=json.dumps({"stop_reason": "refusal", "content": []}),
                 )
@@ -326,8 +316,8 @@ class BiosecurityAssessor:
                 
                 return assessment
             
-            response_text = response.content[0].text
-            logger.info(f"Claude response received for paper {paper.id}, parsing JSON...")
+            response_text = response["text"]
+            logger.info(f"LLM response received for paper {paper.id}, parsing JSON...")
             analysis = json.loads(response_text)
             logger.info(f"JSON parsed successfully for paper {paper.id}")
             
@@ -370,7 +360,7 @@ class BiosecurityAssessor:
                 pathogens_identified=pathogens_json,
                 flagged=flagged,
                 flag_reason=flag_reason,
-                model_version=self.model,
+                model_version=f"{self.llm.provider}/{self.llm.model}",
                 input_prompt=json.dumps(full_input),
                 raw_output=response_text,
             )

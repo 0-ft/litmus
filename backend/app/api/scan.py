@@ -277,9 +277,10 @@ async def fetch_single_paper(
             abstract_parts = article.findall(".//AbstractText")
             abstract = " ".join([p.text or "" for p in abstract_parts])
             
-            # Extract authors
+            # Extract authors and affiliations
             author_list = article.findall(".//Author")
             authors = []
+            affiliations = set()
             for author in author_list:
                 lastname = author.find("LastName")
                 forename = author.find("ForeName")
@@ -288,6 +289,13 @@ async def fetch_single_paper(
                     if forename is not None:
                         name = f"{forename.text} {name}"
                     authors.append(name)
+                
+                # Extract affiliations
+                for aff in author.findall(".//Affiliation"):
+                    if aff.text:
+                        affiliations.add(aff.text)
+            
+            affiliations_json = json.dumps(list(affiliations)) if affiliations else None
             
             # Extract date
             from datetime import datetime
@@ -313,6 +321,7 @@ async def fetch_single_paper(
                 external_id=paper_id,
                 title=title,
                 authors=json.dumps(authors),
+                affiliations=affiliations_json,
                 abstract=abstract,
                 url=f"https://pubmed.ncbi.nlm.nih.gov/{paper_id}/",
                 pdf_url=None,

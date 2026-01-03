@@ -8,9 +8,12 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
       - NCBI_API_KEY=${NCBI_API_KEY:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-5-20250929}
       - ENABLE_SCHEDULER=${ENABLE_SCHEDULER:-false}
       - SCAN_INTERVAL_HOURS=${SCAN_INTERVAL_HOURS:-24}
       - HIGH_RISK_THRESHOLD=${HIGH_RISK_THRESHOLD:-70}
