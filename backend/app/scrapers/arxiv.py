@@ -1,12 +1,15 @@
 """arXiv paper scraper for biology research papers."""
 import arxiv
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from ..models import Paper
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ArxivScraper:
@@ -80,7 +83,11 @@ class ArxivScraper:
     def __init__(self, db: Session):
         """Initialize scraper with database session."""
         self.db = db
-        self.client = arxiv.Client()
+        self.client = arxiv.Client(
+            page_size=50,
+            delay_seconds=1.0,
+            num_retries=2,
+        )
     
     def _paper_exists(self, arxiv_id: str) -> bool:
         """Check if paper already exists in database."""
@@ -128,6 +135,7 @@ class ArxivScraper:
             categories.extend(self.ADJACENT_CATEGORIES)
         
         category_query = " OR ".join([f"cat:{cat}" for cat in categories])
+        logger.info(f"arXiv search: querying {len(categories)} categories, max_results={max_results}")
         
         search = arxiv.Search(
             query=category_query,
@@ -137,7 +145,13 @@ class ArxivScraper:
         )
         
         papers = []
+        count = 0
+        logger.info("arXiv: starting to fetch results...")
         for result in self.client.results(search):
+            count += 1
+            if count % 10 == 0:
+                logger.info(f"arXiv: processed {count} results, {len(papers)} new papers so far")
+            
             # Skip if already in database
             arxiv_id = result.entry_id.split("/")[-1]
             if self._paper_exists(arxiv_id):
@@ -145,6 +159,7 @@ class ArxivScraper:
             
             papers.append(self._result_to_paper(result))
         
+        logger.info(f"arXiv: finished with {len(papers)} new papers from {count} results")
         return papers
     
     def search_by_terms(
@@ -207,7 +222,7 @@ class ArxivScraper:
     def fetch_and_store(
         self,
         max_results: int = None,
-        use_terms: bool = True,
+        use_terms: bool = False,  # Disabled by default - too slow
     ) -> int:
         """
         Fetch papers and store in database.
@@ -222,14 +237,19 @@ class ArxivScraper:
         if max_results is None:
             max_results = settings.max_papers_per_scan
         
+        logger.info(f"arXiv fetch_and_store: max_results={max_results}, use_terms={use_terms}")
+        
         all_papers = []
         
         # Fetch by categories
+        logger.info("arXiv: fetching by categories...")
         category_papers = self.search_by_categories(max_results=max_results)
         all_papers.extend(category_papers)
+        logger.info(f"arXiv: got {len(category_papers)} papers from categories")
         
-        # Optionally fetch by terms
+        # Optionally fetch by terms (disabled by default - very slow)
         if use_terms:
+            logger.info("arXiv: fetching by terms (this may be slow)...")
             term_papers = self.search_by_terms(max_results=max_results // 2)
             # Deduplicate
             seen_ids = {p.external_id for p in all_papers}
@@ -237,12 +257,15 @@ class ArxivScraper:
                 if paper.external_id not in seen_ids:
                     all_papers.append(paper)
                     seen_ids.add(paper.external_id)
+            logger.info(f"arXiv: got {len(term_papers)} papers from term search")
         
         # Store in database
+        logger.info(f"arXiv: storing {len(all_papers)} papers in database...")
         for paper in all_papers:
             self.db.add(paper)
         
         self.db.commit()
+        logger.info(f"arXiv: committed {len(all_papers)} papers to database")
         
         return len(all_papers)
     

@@ -196,10 +196,12 @@ Only extract organizations that appear to be conducting the research.
 Text:
 {text[:5000]}
 
-Respond with JSON array of facility names:
+Respond with ONLY a JSON array of facility names, no other text:
 ["Facility Name 1", "Facility Name 2"]
 
-If no facilities are clearly identified, respond with: []"""
+If no facilities are clearly identified, respond with just: []
+
+IMPORTANT: Respond with ONLY the JSON array, nothing else."""
                 }],
             )
             

@@ -7,10 +7,12 @@ WORKDIR /app
 
 # Copy project files
 COPY pyproject.toml uv.lock* ./
-COPY app/ app/
 
 # Create venv and install dependencies
 RUN uv venv && uv sync --no-dev
+
+# Copy the rest of the application
+COPY app/ app/
 
 # Create data directory
 RUN mkdir -p /app/data

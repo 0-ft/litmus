@@ -1,5 +1,7 @@
 """Claude-based biosecurity risk assessor."""
 import json
+import logging
+import sys
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from anthropic import Anthropic
@@ -9,6 +11,10 @@ from ..config import settings
 from ..models import Paper, Assessment, Facility, ExtractedEntity
 from .criteria import RiskCriteria
 from ..research import FacilityResearcher
+
+# Configure logging to flush immediately
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logger = logging.getLogger(__name__)
 
 
 ASSESSMENT_SYSTEM_PROMPT = """You are an expert biosecurity analyst evaluating research papers for potential biosecurity risks. Your role is to identify and assess risks related to:
@@ -185,6 +191,7 @@ class BiosecurityAssessor:
         
         try:
             # Call Claude
+            logger.info(f"Calling Claude for paper {paper.id}: {paper.title[:50]}...")
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
@@ -194,7 +201,9 @@ class BiosecurityAssessor:
             
             # Parse response
             response_text = response.content[0].text
+            logger.info(f"Claude response received for paper {paper.id}, parsing JSON...")
             analysis = json.loads(response_text)
+            logger.info(f"JSON parsed successfully for paper {paper.id}")
             
             # Calculate scores
             pathogen_score = analysis.get("pathogen_analysis", {}).get("score", 0)
@@ -248,13 +257,15 @@ class BiosecurityAssessor:
             
             self.db.commit()
             
+            logger.info(f"Assessment created for paper {paper.id}: grade={risk_grade}, score={overall_score}")
             return assessment
             
         except json.JSONDecodeError as e:
-            print(f"Failed to parse Claude response for paper {paper.id}: {e}")
+            logger.error(f"Failed to parse Claude response for paper {paper.id}: {e}")
+            logger.error(f"Response text was: {response_text[:500] if 'response_text' in dir() else 'N/A'}...")
             return None
         except Exception as e:
-            print(f"Error assessing paper {paper.id}: {e}")
+            logger.error(f"Error assessing paper {paper.id}: {e}", exc_info=True)
             return None
     
     def _store_extracted_entities(self, paper: Paper, analysis: Dict[str, Any]):

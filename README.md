@@ -17,13 +17,35 @@ AI-powered screening of biology research papers for biosecurity risks. Like a li
 
 ## Quick Start
 
-### Prerequisites
+### Run Everything (Docker)
+
+The easiest way to run both frontend and backend:
+
+```bash
+# Copy example env file and add your API key
+cp .env.example .env
+# Edit .env and set ANTHROPIC_API_KEY
+
+# Start both services
+docker-compose up -d
+```
+
+- Dashboard: http://localhost:3000
+- API: http://localhost:8001
+
+To stop: `docker-compose down`
+
+Configuration is managed via `.env` file. See `.env.example` for all available options.
+
+### Local Development
+
+#### Prerequisites
 
 - Python 3.11+
 - Node.js 20+
 - Anthropic API key (for risk assessment)
 
-### Backend Setup
+#### Backend Setup
 
 ```bash
 cd backend
@@ -43,7 +65,9 @@ uv run uvicorn app.main:app --reload
 
 The API will be available at http://localhost:8000
 
-### Frontend Setup
+> **Note:** For local development, the frontend expects the API at http://localhost:8000. For Docker, it uses http://localhost:8001.
+
+#### Frontend Setup
 
 ```bash
 cd frontend
@@ -114,16 +138,6 @@ To get API keys:
 - `POST /api/scan/all` - Scan all sources
 - `POST /api/scan/assess` - Assess unprocessed papers
 - `POST /api/scan/research-facility?facility_name=...` - Research a facility
-
-## Docker Deployment
-
-```bash
-# Set your API key
-export ANTHROPIC_API_KEY=your-api-key
-
-# Run with Docker Compose
-docker-compose up -d
-```
 
 ## Project Structure
 

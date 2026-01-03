@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export interface Paper {
   id: number;
@@ -72,8 +72,11 @@ export interface Stats {
   processed?: number;
   unprocessed?: number;
   flagged?: number;
+  verified?: number;
   by_source?: Record<string, number>;
   by_grade?: Record<string, number>;
+  by_bsl_level?: Record<string, number>;
+  by_country?: Record<string, number>;
   average_scores?: {
     overall: number;
     pathogen: number;

@@ -35,7 +35,13 @@ class Settings(BaseSettings):
 # Global settings instance
 settings = Settings()
 
-# Ensure data directory exists
-DATA_DIR = Path(__file__).parent.parent.parent / "data"
+# Data directory - use /app/data in Docker, or relative path locally
+# Check if we're in Docker (working dir is /app)
+if Path("/app/data").exists() or Path.cwd() == Path("/app"):
+    DATA_DIR = Path("/app/data")
+else:
+    # Local development - relative to project root
+    DATA_DIR = Path(__file__).parent.parent.parent / "data"
+
 DATA_DIR.mkdir(exist_ok=True)
 
