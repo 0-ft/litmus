@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     
     # Risk thresholds
     high_risk_threshold: int = 70  # Papers scoring above this get flagged
-
+    
     # Claude model
-    claude_model: str = "claude-sonnet-4-5"
+    claude_model: str = "claude-sonnet-4-5-20250929"
     
     # Facility research
     auto_research_facilities: bool = True  # Auto-research facilities mentioned in papers

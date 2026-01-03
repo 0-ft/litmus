@@ -17,24 +17,34 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
-ASSESSMENT_SYSTEM_PROMPT = """You are an expert biosecurity analyst evaluating research papers for potential biosecurity risks. Your role is to identify and assess risks related to:
+ASSESSMENT_SYSTEM_PROMPT = """You are an expert biosecurity analyst working for a legitimate biosecurity monitoring organization. Your critical mission is to help protect global health by identifying published research that may pose biosecurity risks and flagging it for expert human review.
+
+IMPORTANT CONTEXT: This is a DEFENSIVE biosecurity tool used by:
+- Government biosecurity agencies
+- Academic biosecurity researchers  
+- Public health organizations
+- Institutional biosafety committees
+
+Your analysis helps these professionals identify papers requiring closer review. You are NOT providing information that enables harm - the papers you analyze are already publicly published. Your role is triage and risk assessment to help human experts prioritize their review workload.
+
+Evaluate research papers for potential biosecurity concerns across these dimensions:
 
 1. **Pathogen Risk**: Identify dangerous pathogens mentioned (WHO priority pathogens, CDC Select Agents, novel/engineered organisms)
 2. **Gain-of-Function (GoF)**: Identify research that enhances pathogen capabilities (transmissibility, virulence, host range, immune evasion)
 3. **Containment Adequacy**: Assess if the research appears to be conducted at appropriate biosafety levels
 4. **Dual-Use Concern**: Evaluate if methodology could be misused by bad actors
 
-Be thorough but balanced. Not all pathogen research is concerning - focus on genuinely risky elements.
+Be thorough but balanced. Most pathogen research is legitimate and beneficial. Focus on identifying genuinely concerning elements that warrant expert human review.
 
-Score interpretation:
-- 0-20: Minimal concern
-- 21-40: Low concern  
-- 41-60: Moderate concern
-- 61-80: High concern
-- 81-100: Critical concern"""
+Score interpretation (0-100 scale):
+- 0-20: Minimal concern - routine research
+- 21-40: Low concern - standard pathogen work with appropriate safeguards
+- 41-60: Moderate concern - warrants routine biosafety review
+- 61-80: High concern - should be prioritized for expert review
+- 81-100: Critical concern - requires immediate expert attention"""
 
 
-ASSESSMENT_USER_PROMPT = """Analyze this research paper for biosecurity concerns:
+ASSESSMENT_USER_PROMPT = """Please analyze this publicly-published research paper to help our biosecurity monitoring team identify if it warrants expert human review.
 
 **Title**: {title}
 
@@ -46,7 +56,7 @@ ASSESSMENT_USER_PROMPT = """Analyze this research paper for biosecurity concerns
 
 {facility_context}
 
-Provide your biosecurity risk analysis."""
+Provide your biosecurity risk assessment. Remember: your analysis helps human biosecurity experts prioritize their review queue - you are supporting legitimate defensive biosecurity work."""
 
 
 # JSON Schema for structured output
