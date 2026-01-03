@@ -30,6 +30,10 @@ export interface Assessment {
   flag_reason: string | null;
   assessed_at: string;
   model_version: string | null;
+  // Debug/trace fields
+  input_prompt: string | null;
+  raw_output: string | null;
+  // Joined fields
   paper_title?: string;
   paper_source?: string;
   paper_external_id?: string;

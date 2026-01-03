@@ -43,6 +43,10 @@ class Assessment(Base):
     # Model used for assessment
     model_version = Column(String(50), nullable=True)
     
+    # Debug/trace information
+    input_prompt = Column(Text, nullable=True)  # Full prompt sent to model
+    raw_output = Column(Text, nullable=True)    # Raw model response
+    
     # Relationship
     paper = relationship("Paper", back_populates="assessments")
     

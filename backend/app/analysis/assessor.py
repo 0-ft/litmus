@@ -246,6 +246,14 @@ class BiosecurityAssessor:
             # Parse response - guaranteed valid JSON with structured outputs
             logger.info(f"Claude response for paper {paper.id}: content length={len(response.content)}, stop_reason={response.stop_reason}")
             
+            # Build full input for debug trace
+            full_input = {
+                "system": ASSESSMENT_SYSTEM_PROMPT,
+                "user": user_prompt,
+                "model": self.model,
+                "output_format": "json_schema (structured outputs)"
+            }
+            
             # Handle model refusal
             if response.stop_reason == "refusal" or not response.content:
                 logger.warning(f"Claude refused to assess paper {paper.id} - may contain sensitive content")
@@ -263,6 +271,9 @@ class BiosecurityAssessor:
                     pathogens_identified=None,
                     flagged=True,
                     flag_reason="Model refused assessment - requires manual expert review",
+                    model_version=self.model,
+                    input_prompt=json.dumps(full_input),
+                    raw_output=json.dumps({"stop_reason": "refusal", "content": []}),
                 )
                 self.db.add(assessment)
                 paper.processed = True
@@ -308,7 +319,7 @@ class BiosecurityAssessor:
             overall_assessment = analysis.get("overall_assessment", {})
             concerns_summary = overall_assessment.get("risk_summary", "")
             
-            # Create assessment
+            # Create assessment with full debug trace
             assessment = Assessment(
                 paper_id=paper.id,
                 risk_grade=risk_grade,
@@ -323,6 +334,8 @@ class BiosecurityAssessor:
                 flagged=flagged,
                 flag_reason=flag_reason,
                 model_version=self.model,
+                input_prompt=json.dumps(full_input),
+                raw_output=response_text,
             )
             
             self.db.add(assessment)

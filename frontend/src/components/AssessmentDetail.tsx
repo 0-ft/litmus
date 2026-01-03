@@ -1,19 +1,26 @@
 "use client";
 
+import { useState } from "react";
 import { Assessment } from "@/lib/api";
 import { RiskBadge, ScoreBar } from "./RiskBadge";
 import { cn, formatDate } from "@/lib/utils";
-import { AlertTriangle, Shield, Biohazard, FlaskConical, Users } from "lucide-react";
+import { AlertTriangle, Shield, Biohazard, FlaskConical, Users, ChevronDown, ChevronRight, Bug, FileText, MessageSquare } from "lucide-react";
 
 interface AssessmentDetailProps {
   assessment: Assessment;
 }
 
 export function AssessmentDetail({ assessment }: AssessmentDetailProps) {
+  const [showDebug, setShowDebug] = useState(false);
+  
   const rationale = assessment.rationale ? JSON.parse(assessment.rationale) : null;
   const pathogens = assessment.pathogens_identified
     ? JSON.parse(assessment.pathogens_identified)
     : [];
+  
+  // Parse debug data
+  const inputPrompt = assessment.input_prompt ? JSON.parse(assessment.input_prompt) : null;
+  const rawOutput = assessment.raw_output;
 
   return (
     <div className="space-y-6">
@@ -134,6 +141,84 @@ export function AssessmentDetail({ assessment }: AssessmentDetailProps) {
           <span>Model: {assessment.model_version}</span>
         )}
       </div>
+
+      {/* Debug View */}
+      {(inputPrompt || rawOutput) && (
+        <div className="rounded-lg border border-border bg-card">
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            className="flex items-center gap-2 w-full p-4 text-left hover:bg-muted/50 transition-colors"
+          >
+            {showDebug ? (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            )}
+            <Bug className="h-4 w-4 text-muted-foreground" />
+            <span className="font-medium">Debug View</span>
+            <span className="text-xs text-muted-foreground ml-2">
+              (Full assessment trace)
+            </span>
+          </button>
+          
+          {showDebug && (
+            <div className="border-t border-border p-4 space-y-6">
+              {/* Input Prompt */}
+              {inputPrompt && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-blue-500" />
+                    <h4 className="font-medium">Input to Model</h4>
+                  </div>
+                  
+                  {/* System Prompt */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      System Prompt
+                    </label>
+                    <pre className="bg-muted/50 rounded-lg p-3 text-xs overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap font-mono">
+                      {inputPrompt.system}
+                    </pre>
+                  </div>
+                  
+                  {/* User Prompt */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      User Prompt
+                    </label>
+                    <pre className="bg-muted/50 rounded-lg p-3 text-xs overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap font-mono">
+                      {inputPrompt.user}
+                    </pre>
+                  </div>
+                  
+                  {/* Model & Format */}
+                  <div className="flex gap-4 text-xs text-muted-foreground">
+                    <span>Model: <code className="bg-muted px-1 rounded">{inputPrompt.model}</code></span>
+                    <span>Format: <code className="bg-muted px-1 rounded">{inputPrompt.output_format}</code></span>
+                  </div>
+                </div>
+              )}
+              
+              {/* Raw Output */}
+              {rawOutput && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 text-green-500" />
+                    <h4 className="font-medium">Raw Model Output</h4>
+                  </div>
+                  <pre className="bg-muted/50 rounded-lg p-3 text-xs overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap font-mono">
+                    {typeof rawOutput === 'string' 
+                      ? (rawOutput.startsWith('{') 
+                          ? JSON.stringify(JSON.parse(rawOutput), null, 2)
+                          : rawOutput)
+                      : JSON.stringify(rawOutput, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
