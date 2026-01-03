@@ -13,6 +13,7 @@ import {
   Loader2,
   Circle,
   XCircle,
+  Link,
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -408,6 +409,7 @@ export default function ScanPage() {
   });
 
   const [facilitySearch, setFacilitySearch] = useState("");
+  const [paperUrl, setPaperUrl] = useState("");
   
   const researchFacility = useMutation({
     mutationFn: (name: string) => scanApi.researchFacility(name),
@@ -427,6 +429,26 @@ export default function ScanPage() {
     },
   });
 
+  const fetchPaper = useMutation({
+    mutationFn: (url: string) => scanApi.fetchPaper(url),
+    onSuccess: (data) => {
+      const statusMsg = data.already_exists ? " (already in database)" : "";
+      addResult({
+        success: data.success,
+        message: `${data.message}${statusMsg}${data.title ? `: "${data.title}"` : ""}`,
+      });
+      setPaperUrl("");
+      queryClient.invalidateQueries({ queryKey: ["papers"] });
+      queryClient.invalidateQueries({ queryKey: ["paper-stats"] });
+    },
+    onError: (error) => {
+      addResult({
+        success: false,
+        message: `Failed to fetch paper: ${error}`,
+      });
+    },
+  });
+
   const isAnyLoading =
     scanArxiv.isPending ||
     scanBiorxiv.isPending ||
@@ -434,7 +456,8 @@ export default function ScanPage() {
     scanProgress.isScanning ||
     assessProgress.isAssessing ||
     assessPapers.isPending ||
-    researchFacility.isPending;
+    researchFacility.isPending ||
+    fetchPaper.isPending;
 
   const SourceStatusIcon = ({ status }: { status: SourceProgress["status"] }) => {
     switch (status) {
@@ -831,6 +854,53 @@ export default function ScanPage() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Fetch Paper by URL */}
+      <div className="rounded-xl border border-border bg-card p-6">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="rounded-lg bg-muted p-3">
+            {fetchPaper.isPending ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <Link className="h-6 w-6 text-muted-foreground" />
+            )}
+          </div>
+          <div>
+            <h3 className="font-medium">Fetch Paper by URL</h3>
+            <p className="text-sm text-muted-foreground">
+              Import a specific paper from arXiv, bioRxiv, medRxiv, or PubMed
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="https://arxiv.org/abs/2401.12345 or PMID:12345678..."
+            value={paperUrl}
+            onChange={(e) => setPaperUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && paperUrl.trim() && !isAnyLoading) {
+                fetchPaper.mutate(paperUrl.trim());
+              }
+            }}
+            className="flex-1 rounded-lg border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+          <button
+            onClick={() => {
+              if (paperUrl.trim()) {
+                fetchPaper.mutate(paperUrl.trim());
+              }
+            }}
+            disabled={isAnyLoading || !paperUrl.trim()}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            Fetch
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Supported: arXiv URLs, bioRxiv/medRxiv URLs, PubMed URLs, or just a PMID
+        </p>
       </div>
 
       {/* Results */}

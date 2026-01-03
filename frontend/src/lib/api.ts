@@ -152,6 +152,15 @@ export const facilitiesApi = {
     fetchApi<Stats>(`/api/facilities/stats/summary`),
 };
 
+export interface FetchPaperResponse {
+  success: boolean;
+  message: string;
+  paper_id?: number;
+  title?: string;
+  source?: string;
+  already_exists: boolean;
+}
+
 // Scan API
 export const scanApi = {
   arxiv: (maxResults = 100) =>
@@ -174,5 +183,25 @@ export const scanApi = {
       `/api/scan/research-facility?facility_name=${encodeURIComponent(facilityName)}`,
       { method: "POST" }
     ),
+  
+  fetchPaper: (url: string) =>
+    fetchApi<FetchPaperResponse>(`/api/scan/fetch-paper`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  
+  assessPaper: (paperId: number, force = false) =>
+    fetchApi<{
+      success: boolean;
+      message: string;
+      paper_id: number;
+      risk_grade?: string;
+      overall_score?: number;
+      flagged: boolean;
+      flag_reason?: string;
+      concerns_summary?: string;
+      pathogens?: string[];
+      already_assessed: boolean;
+    }>(`/api/scan/assess-paper/${paperId}?force=${force}`, { method: "POST" }),
 };
 

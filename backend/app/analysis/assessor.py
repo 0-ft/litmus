@@ -202,6 +202,19 @@ class BiosecurityAssessor:
             # Parse response
             response_text = response.content[0].text
             logger.info(f"Claude response received for paper {paper.id}, parsing JSON...")
+            
+            # Strip markdown code fences if present
+            response_text = response_text.strip()
+            if response_text.startswith("```"):
+                # Remove opening fence (```json or ```)
+                lines = response_text.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                # Remove closing fence
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                response_text = "\n".join(lines)
+            
             analysis = json.loads(response_text)
             logger.info(f"JSON parsed successfully for paper {paper.id}")
             

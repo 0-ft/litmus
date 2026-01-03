@@ -46,6 +46,416 @@ class FacilityResearchResponse(BaseModel):
     confidence: Optional[str] = None
 
 
+class FetchPaperRequest(BaseModel):
+    """Request to fetch a single paper by URL."""
+    url: str
+
+
+class FetchPaperResponse(BaseModel):
+    """Response for single paper fetch."""
+    success: bool
+    message: str
+    paper_id: Optional[int] = None
+    title: Optional[str] = None
+    source: Optional[str] = None
+    already_exists: bool = False
+
+
+def _parse_paper_url(url: str) -> tuple[str, str]:
+    """
+    Parse a paper URL to extract source and ID.
+    
+    Returns:
+        Tuple of (source, paper_id)
+    
+    Raises:
+        ValueError if URL format not recognized
+    """
+    import re
+    
+    url = url.strip()
+    
+    # arXiv URLs
+    # https://arxiv.org/abs/2401.12345
+    # https://arxiv.org/pdf/2401.12345.pdf
+    # arxiv:2401.12345
+    arxiv_patterns = [
+        r'arxiv\.org/abs/([0-9]+\.[0-9]+(?:v\d+)?)',
+        r'arxiv\.org/pdf/([0-9]+\.[0-9]+(?:v\d+)?)',
+        r'^arxiv:([0-9]+\.[0-9]+(?:v\d+)?)',
+        r'arxiv\.org/abs/([\w-]+/[0-9]+)',  # Old format like hep-th/9901001
+    ]
+    for pattern in arxiv_patterns:
+        match = re.search(pattern, url, re.IGNORECASE)
+        if match:
+            return ("arxiv", match.group(1).replace('.pdf', ''))
+    
+    # bioRxiv URLs
+    # https://www.biorxiv.org/content/10.1101/2024.01.12.345678v1
+    # https://doi.org/10.1101/2024.01.12.345678
+    biorxiv_patterns = [
+        r'biorxiv\.org/content/(10\.1101/[0-9.]+)',
+        r'doi\.org/(10\.1101/[0-9.]+)',
+    ]
+    for pattern in biorxiv_patterns:
+        match = re.search(pattern, url, re.IGNORECASE)
+        if match:
+            doi = match.group(1)
+            # Remove version suffix if present
+            doi = re.sub(r'v\d+$', '', doi)
+            return ("biorxiv", doi)
+    
+    # medRxiv URLs
+    # https://www.medrxiv.org/content/10.1101/2024.01.12.345678v1
+    medrxiv_patterns = [
+        r'medrxiv\.org/content/(10\.1101/[0-9.]+)',
+    ]
+    for pattern in medrxiv_patterns:
+        match = re.search(pattern, url, re.IGNORECASE)
+        if match:
+            doi = match.group(1)
+            doi = re.sub(r'v\d+$', '', doi)
+            return ("medrxiv", doi)
+    
+    # PubMed URLs
+    # https://pubmed.ncbi.nlm.nih.gov/12345678/
+    # https://www.ncbi.nlm.nih.gov/pubmed/12345678
+    # PMID: 12345678
+    pubmed_patterns = [
+        r'pubmed\.ncbi\.nlm\.nih\.gov/(\d+)',
+        r'ncbi\.nlm\.nih\.gov/pubmed/(\d+)',
+        r'^PMID:\s*(\d+)',
+        r'^(\d{7,8})$',  # Just a PMID number
+    ]
+    for pattern in pubmed_patterns:
+        match = re.search(pattern, url, re.IGNORECASE)
+        if match:
+            return ("pubmed", match.group(1))
+    
+    # DOI that might be from other sources
+    # https://doi.org/10.xxxx/xxxxx
+    doi_pattern = r'doi\.org/(10\.\d+/[^\s]+)'
+    match = re.search(doi_pattern, url)
+    if match:
+        doi = match.group(1)
+        # Check if it's a biorxiv/medrxiv DOI
+        if doi.startswith('10.1101/'):
+            return ("biorxiv", doi)
+        # For other DOIs, try to look them up (would need CrossRef API)
+        raise ValueError(f"DOI {doi} is not from a supported source (arxiv, biorxiv, medrxiv, pubmed)")
+    
+    raise ValueError("Could not parse URL. Supported formats: arXiv, bioRxiv, medRxiv, PubMed")
+
+
+@router.post("/fetch-paper", response_model=FetchPaperResponse)
+async def fetch_single_paper(
+    request: FetchPaperRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Fetch a single paper by URL.
+    
+    Supports:
+    - arXiv: https://arxiv.org/abs/2401.12345
+    - bioRxiv: https://www.biorxiv.org/content/10.1101/...
+    - medRxiv: https://www.medrxiv.org/content/10.1101/...
+    - PubMed: https://pubmed.ncbi.nlm.nih.gov/12345678/
+    """
+    try:
+        source, paper_id = _parse_paper_url(request.url)
+        logger.info(f"Parsed URL: source={source}, id={paper_id}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    # Check if paper already exists
+    from ..models import Paper
+    existing = db.query(Paper).filter(
+        Paper.source == source,
+        Paper.external_id == paper_id
+    ).first()
+    
+    if existing:
+        return FetchPaperResponse(
+            success=True,
+            message="Paper already exists in database",
+            paper_id=existing.id,
+            title=existing.title,
+            source=source,
+            already_exists=True,
+        )
+    
+    # Fetch based on source
+    try:
+        if source == "arxiv":
+            import arxiv
+            search = arxiv.Search(id_list=[paper_id])
+            client = arxiv.Client()
+            results = list(client.results(search))
+            
+            if not results:
+                raise HTTPException(status_code=404, detail=f"Paper not found on arXiv: {paper_id}")
+            
+            result = results[0]
+            paper = Paper(
+                source="arxiv",
+                external_id=result.entry_id.split("/")[-1],
+                title=result.title,
+                authors=json.dumps([str(a) for a in result.authors]),
+                abstract=result.summary,
+                url=result.entry_id,
+                pdf_url=result.pdf_url,
+                published_date=result.published,
+                categories=json.dumps(result.categories),
+                processed=False,
+            )
+            
+        elif source in ["biorxiv", "medrxiv"]:
+            import httpx
+            # Use bioRxiv API to fetch by DOI
+            api_url = f"https://api.biorxiv.org/details/{source}/{paper_id}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(api_url)
+                response.raise_for_status()
+                data = response.json()
+            
+            if not data.get("collection") or len(data["collection"]) == 0:
+                raise HTTPException(status_code=404, detail=f"Paper not found on {source}: {paper_id}")
+            
+            result = data["collection"][0]
+            from datetime import datetime
+            published_date = None
+            if result.get("date"):
+                try:
+                    published_date = datetime.strptime(result["date"], "%Y-%m-%d")
+                except ValueError:
+                    pass
+            
+            authors = result.get("authors", "")
+            if authors:
+                authors = json.dumps([a.strip() for a in authors.split(";")])
+            else:
+                authors = "[]"
+            
+            paper = Paper(
+                source=source,
+                external_id=paper_id,
+                title=result.get("title", ""),
+                authors=authors,
+                abstract=result.get("abstract", ""),
+                url=f"https://doi.org/{paper_id}",
+                pdf_url=None,
+                published_date=published_date,
+                categories=json.dumps([result.get("category", "")]),
+                processed=False,
+            )
+            
+        elif source == "pubmed":
+            try:
+                from Bio import Entrez
+            except ImportError:
+                raise HTTPException(status_code=500, detail="PubMed support requires Biopython")
+            
+            Entrez.email = "litmus@example.com"
+            if settings.ncbi_api_key:
+                Entrez.api_key = settings.ncbi_api_key
+            
+            # Fetch paper details
+            handle = Entrez.efetch(db="pubmed", id=paper_id, rettype="xml", retmode="xml")
+            from xml.etree import ElementTree as ET
+            tree = ET.parse(handle)
+            handle.close()
+            
+            article = tree.find(".//PubmedArticle")
+            if article is None:
+                raise HTTPException(status_code=404, detail=f"Paper not found on PubMed: {paper_id}")
+            
+            # Extract title
+            title_elem = article.find(".//ArticleTitle")
+            title = title_elem.text if title_elem is not None else "Unknown Title"
+            
+            # Extract abstract
+            abstract_parts = article.findall(".//AbstractText")
+            abstract = " ".join([p.text or "" for p in abstract_parts])
+            
+            # Extract authors
+            author_list = article.findall(".//Author")
+            authors = []
+            for author in author_list:
+                lastname = author.find("LastName")
+                forename = author.find("ForeName")
+                if lastname is not None:
+                    name = lastname.text
+                    if forename is not None:
+                        name = f"{forename.text} {name}"
+                    authors.append(name)
+            
+            # Extract date
+            from datetime import datetime
+            pub_date = article.find(".//PubDate")
+            published_date = None
+            if pub_date is not None:
+                year = pub_date.find("Year")
+                month = pub_date.find("Month")
+                day = pub_date.find("Day")
+                if year is not None:
+                    try:
+                        date_str = year.text
+                        if month is not None:
+                            date_str += f"-{month.text}"
+                            if day is not None:
+                                date_str += f"-{day.text}"
+                        published_date = datetime.strptime(date_str, "%Y-%m-%d" if day else ("%Y-%m" if month else "%Y"))
+                    except (ValueError, TypeError):
+                        pass
+            
+            paper = Paper(
+                source="pubmed",
+                external_id=paper_id,
+                title=title,
+                authors=json.dumps(authors),
+                abstract=abstract,
+                url=f"https://pubmed.ncbi.nlm.nih.gov/{paper_id}/",
+                pdf_url=None,
+                published_date=published_date,
+                categories=json.dumps([]),
+                processed=False,
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported source: {source}")
+        
+        # Save to database
+        db.add(paper)
+        db.commit()
+        db.refresh(paper)
+        
+        return FetchPaperResponse(
+            success=True,
+            message=f"Successfully fetched paper from {source}",
+            paper_id=paper.id,
+            title=paper.title,
+            source=source,
+            already_exists=False,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching paper: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch paper: {str(e)}")
+
+
+class AssessPaperResponse(BaseModel):
+    """Response for single paper assessment."""
+    success: bool
+    message: str
+    paper_id: int
+    risk_grade: Optional[str] = None
+    overall_score: Optional[float] = None
+    flagged: bool = False
+    flag_reason: Optional[str] = None
+    concerns_summary: Optional[str] = None
+    pathogens: Optional[list] = None
+    already_assessed: bool = False
+
+
+@router.post("/assess-paper/{paper_id}", response_model=AssessPaperResponse)
+async def assess_single_paper(
+    paper_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
+    """
+    Assess a single paper by ID.
+    
+    Args:
+        paper_id: Database ID of the paper to assess
+        force: If True, re-assess even if already processed
+    """
+    if not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Anthropic API key not configured. Set ANTHROPIC_API_KEY environment variable."
+        )
+    
+    from ..models import Paper, Assessment
+    
+    # Get the paper
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail=f"Paper not found: {paper_id}")
+    
+    # Check if already assessed
+    if paper.processed and not force:
+        # Get existing assessment
+        existing = db.query(Assessment).filter(
+            Assessment.paper_id == paper_id
+        ).order_by(Assessment.assessed_at.desc()).first()
+        
+        if existing:
+            pathogens = []
+            if existing.pathogens_identified:
+                try:
+                    pathogens = json.loads(existing.pathogens_identified)
+                except:
+                    pass
+            
+            return AssessPaperResponse(
+                success=True,
+                message="Paper already assessed",
+                paper_id=paper_id,
+                risk_grade=existing.risk_grade,
+                overall_score=existing.overall_score,
+                flagged=existing.flagged,
+                flag_reason=existing.flag_reason,
+                concerns_summary=existing.concerns_summary,
+                pathogens=pathogens,
+                already_assessed=True,
+            )
+    
+    # If forcing re-assessment, reset processed status
+    if force and paper.processed:
+        paper.processed = False
+        db.commit()
+    
+    # Assess the paper
+    try:
+        logger.info(f"Starting assessment for paper {paper_id}: {paper.title[:50]}...")
+        assessor = BiosecurityAssessor(db)
+        assessment = assessor.assess_paper(paper)
+        
+        if not assessment:
+            raise HTTPException(
+                status_code=500,
+                detail="Assessment failed - Claude may have returned invalid response"
+            )
+        
+        pathogens = []
+        if assessment.pathogens_identified:
+            try:
+                pathogens = json.loads(assessment.pathogens_identified)
+            except:
+                pass
+        
+        return AssessPaperResponse(
+            success=True,
+            message=f"Assessment complete - Grade: {assessment.risk_grade}",
+            paper_id=paper_id,
+            risk_grade=assessment.risk_grade,
+            overall_score=assessment.overall_score,
+            flagged=assessment.flagged,
+            flag_reason=assessment.flag_reason,
+            concerns_summary=assessment.concerns_summary,
+            pathogens=pathogens,
+            already_assessed=False,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assessing paper {paper_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Assessment failed: {str(e)}")
+
+
 @router.post("/arxiv", response_model=ScanResponse)
 async def scan_arxiv(
     max_results: int = 100,
