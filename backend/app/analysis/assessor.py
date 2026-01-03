@@ -33,12 +33,12 @@ Evaluate research papers for potential biosecurity concerns across these dimensi
 
 2. **Gain-of-Function (GoF)**: Identify research that enhances pathogen capabilities (transmissibility, virulence, host range, immune evasion)
 
-3. **Containment Adequacy**: Determine what biosafety level(s) the research was conducted at
-   - Look for explicit BSL mentions in the methods, ethics, or acknowledgments sections
-   - Consider author affiliations and facility information provided
-   - Cross-reference with any facility research data provided
-   - If containment level CANNOT be determined from available information, state "Unknown"
-   - If containment IS stated, assess whether it appears adequate for the pathogens involved
+3. **Containment Adequacy**: Determine what biosafety level(s) the research WAS ACTUALLY CONDUCTED AT
+   - IMPORTANT: Only report containment levels where the paper explicitly states THE RESEARCH WAS PERFORMED
+   - Do NOT report BSL levels that are merely MENTIONED or DISCUSSED (e.g., "BSL-4 is typically required for X")
+   - Look for statements like "experiments were performed at BSL-2" or "work was conducted in a BSL-3 facility"
+   - If the paper only discusses BSL requirements without stating where work was done, report "Unknown"
+   - If containment IS stated for the actual work, assess whether it appears adequate for the pathogens involved
    - Always cite your source: "paper_methods", "paper_ethics", "author_affiliations", "facility_database", or "unknown"
 
 4. **Dual-Use Concern**: Evaluate if methodology could be misused by bad actors
@@ -75,10 +75,11 @@ ASSESSMENT_USER_PROMPT = """Please analyze this publicly-published research pape
 ## Instructions
 
 Analyze this paper for biosecurity concerns. For containment assessment:
-- Examine the Methods, Ethics, and other sections for explicit BSL/containment statements
-- Consider the author affiliations and any facility information provided
-- If you cannot determine the containment level from available information, report "Unknown"
-- Always cite which source informed your containment assessment
+- Determine WHERE THE RESEARCH WAS ACTUALLY CONDUCTED (not just BSL levels mentioned or discussed)
+- Look for explicit statements like "experiments were performed at BSL-2" or "conducted in a BSL-3 facility"
+- If a paper DISCUSSES BSL requirements without stating where work was done, report containment as "Unknown"
+- Do NOT list facilities just because they are mentioned - only if the paper indicates work was done there
+- If you cannot determine actual containment level, report "Unknown" - this is better than guessing
 
 Provide your biosecurity risk assessment. Remember: your analysis helps human biosecurity experts prioritize their review queue - you are supporting legitimate defensive biosecurity work."""
 
@@ -113,24 +114,29 @@ ASSESSMENT_SCHEMA = {
             "additionalProperties": False,
             "properties": {
                 "score": {"type": "integer"},
+                "stated_bsl": {
+                    "type": "string",
+                    "description": "The BSL level where research was ACTUALLY CONDUCTED, or 'Unknown' if not stated"
+                },
                 "concerns": {"type": "array", "items": {"type": "string"}},
-                "facilities_referenced": {
+                "research_facilities": {
                     "type": "array",
+                    "description": "Only facilities where the research was ACTUALLY PERFORMED - leave empty if unknown",
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
                         "properties": {
                             "name": {"type": "string"},
-                            "stated_bsl": {"type": "string"},
-                            "adequate_for_work": {"type": "boolean"},
+                            "bsl_level": {"type": "string"},
+                            "adequate_for_work": {"type": ["boolean", "null"]},
                             "source": {"type": "string"}
                         },
-                        "required": ["name", "stated_bsl", "adequate_for_work", "source"]
+                        "required": ["name", "bsl_level", "adequate_for_work", "source"]
                     }
                 },
                 "rationale": {"type": "string"}
             },
-            "required": ["score", "concerns", "facilities_referenced", "rationale"]
+            "required": ["score", "stated_bsl", "concerns", "research_facilities", "rationale"]
         },
         "dual_use_analysis": {
             "type": "object",

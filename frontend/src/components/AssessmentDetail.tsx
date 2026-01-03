@@ -121,27 +121,46 @@ export function AssessmentDetail({ assessment }: AssessmentDetailProps) {
             {rationale.containment_analysis?.rationale && (
               <div>
                 <h4 className="font-medium text-muted-foreground">Containment Analysis</h4>
-                <p className="mt-1">{rationale.containment_analysis.rationale}</p>
                 
-                {/* Facility References */}
-                {rationale.containment_analysis.facilities_referenced?.length > 0 && (
+                {/* Stated BSL Level */}
+                {rationale.containment_analysis.stated_bsl && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Stated containment:</span>
+                    <span className={`px-2 py-0.5 rounded text-sm font-medium ${
+                      rationale.containment_analysis.stated_bsl === 'Unknown'
+                        ? 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400'
+                        : 'bg-blue-500/20 text-blue-700 dark:text-blue-400'
+                    }`}>
+                      {rationale.containment_analysis.stated_bsl}
+                    </span>
+                  </div>
+                )}
+                
+                <p className="mt-2">{rationale.containment_analysis.rationale}</p>
+                
+                {/* Research Facilities */}
+                {rationale.containment_analysis.research_facilities?.length > 0 && (
                   <div className="mt-3 space-y-2">
-                    <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Facilities Referenced</h5>
+                    <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Research Facilities Identified</h5>
                     <div className="space-y-2">
-                      {rationale.containment_analysis.facilities_referenced.map((facility: any, idx: number) => (
+                      {rationale.containment_analysis.research_facilities.map((facility: any, idx: number) => (
                         <div key={idx} className="rounded-lg bg-muted/50 p-3 text-sm">
                           <div className="flex items-center justify-between">
                             <span className="font-medium">{facility.name}</span>
                             <span className={`text-xs px-2 py-0.5 rounded ${
-                              facility.adequate_for_work 
+                              facility.adequate_for_work === true
                                 ? 'bg-green-500/20 text-green-700 dark:text-green-400' 
-                                : 'bg-red-500/20 text-red-700 dark:text-red-400'
+                                : facility.adequate_for_work === false
+                                ? 'bg-red-500/20 text-red-700 dark:text-red-400'
+                                : 'bg-gray-500/20 text-gray-700 dark:text-gray-400'
                             }`}>
-                              {facility.adequate_for_work ? '✓ Adequate' : '⚠ Concern'}
+                              {facility.adequate_for_work === true ? '✓ Adequate' 
+                                : facility.adequate_for_work === false ? '⚠ Concern' 
+                                : '? Unknown'}
                             </span>
                           </div>
                           <div className="mt-1 text-muted-foreground">
-                            <span>BSL: {facility.stated_bsl}</span>
+                            <span>BSL: {facility.bsl_level || facility.stated_bsl}</span>
                             <span className="mx-2">•</span>
                             <span>Source: {facility.source}</span>
                           </div>
