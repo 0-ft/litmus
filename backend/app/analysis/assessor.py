@@ -26,7 +26,12 @@ ASSESSMENT_SYSTEM_PROMPT = """You are an expert biosecurity analyst evaluating r
 
 Be thorough but balanced. Not all pathogen research is concerning - focus on genuinely risky elements.
 
-You must respond with valid JSON only, no other text."""
+Score interpretation:
+- 0-20: Minimal concern
+- 21-40: Low concern  
+- 41-60: Moderate concern
+- 61-80: High concern
+- 81-100: Critical concern"""
 
 
 ASSESSMENT_USER_PROMPT = """Analyze this research paper for biosecurity concerns:
@@ -41,48 +46,70 @@ ASSESSMENT_USER_PROMPT = """Analyze this research paper for biosecurity concerns
 
 {facility_context}
 
-Provide your analysis as JSON with this exact structure:
-{{
-    "pathogen_analysis": {{
-        "score": <0-100>,
-        "pathogens_identified": ["pathogen1", "pathogen2"],
-        "rationale": "explanation"
-    }},
-    "gof_analysis": {{
-        "score": <0-100>,
-        "indicators_found": ["indicator1", "indicator2"],
-        "rationale": "explanation"
-    }},
-    "containment_analysis": {{
-        "score": <0-100>,
-        "concerns": ["concern1", "concern2"],
-        "rationale": "explanation"
-    }},
-    "dual_use_analysis": {{
-        "score": <0-100>,
-        "concerns": ["concern1", "concern2"],
-        "rationale": "explanation"
-    }},
-    "overall_assessment": {{
-        "risk_summary": "brief overall risk summary",
-        "key_concerns": ["main concern 1", "main concern 2"],
-        "recommended_action": "flag_for_review|monitor|no_action"
-    }},
-    "extracted_entities": {{
-        "facilities": ["facility1", "facility2"],
-        "pathogens": ["pathogen1", "pathogen2"],
-        "techniques": ["technique1", "technique2"]
-    }}
-}}
+Provide your biosecurity risk analysis."""
 
-Score interpretation:
-- 0-20: Minimal concern
-- 21-40: Low concern  
-- 41-60: Moderate concern
-- 61-80: High concern
-- 81-100: Critical concern
 
-Respond with only the JSON, no other text."""
+# JSON Schema for structured output
+ASSESSMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pathogen_analysis": {
+            "type": "object",
+            "properties": {
+                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "pathogens_identified": {"type": "array", "items": {"type": "string"}},
+                "rationale": {"type": "string"}
+            },
+            "required": ["score", "pathogens_identified", "rationale"]
+        },
+        "gof_analysis": {
+            "type": "object",
+            "properties": {
+                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "indicators_found": {"type": "array", "items": {"type": "string"}},
+                "rationale": {"type": "string"}
+            },
+            "required": ["score", "indicators_found", "rationale"]
+        },
+        "containment_analysis": {
+            "type": "object",
+            "properties": {
+                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "concerns": {"type": "array", "items": {"type": "string"}},
+                "rationale": {"type": "string"}
+            },
+            "required": ["score", "concerns", "rationale"]
+        },
+        "dual_use_analysis": {
+            "type": "object",
+            "properties": {
+                "score": {"type": "integer", "minimum": 0, "maximum": 100},
+                "concerns": {"type": "array", "items": {"type": "string"}},
+                "rationale": {"type": "string"}
+            },
+            "required": ["score", "concerns", "rationale"]
+        },
+        "overall_assessment": {
+            "type": "object",
+            "properties": {
+                "risk_summary": {"type": "string"},
+                "key_concerns": {"type": "array", "items": {"type": "string"}},
+                "recommended_action": {"type": "string", "enum": ["flag_for_review", "monitor", "no_action"]}
+            },
+            "required": ["risk_summary", "key_concerns", "recommended_action"]
+        },
+        "extracted_entities": {
+            "type": "object",
+            "properties": {
+                "facilities": {"type": "array", "items": {"type": "string"}},
+                "pathogens": {"type": "array", "items": {"type": "string"}},
+                "techniques": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["facilities", "pathogens", "techniques"]
+        }
+    },
+    "required": ["pathogen_analysis", "gof_analysis", "containment_analysis", "dual_use_analysis", "overall_assessment", "extracted_entities"]
+}
 
 
 class BiosecurityAssessor:
@@ -190,31 +217,31 @@ class BiosecurityAssessor:
         )
         
         try:
-            # Call Claude
+            # Call Claude with structured output
             logger.info(f"Calling Claude for paper {paper.id}: {paper.title[:50]}...")
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
                 system=ASSESSMENT_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_prompt}],
+                extra_headers={
+                    "anthropic-beta": "structured-outputs-2025-11-13"
+                },
+                extra_body={
+                    "output_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "biosecurity_assessment",
+                            "schema": ASSESSMENT_SCHEMA,
+                            "strict": True
+                        }
+                    }
+                }
             )
             
-            # Parse response
+            # Parse response - guaranteed valid JSON with structured outputs
             response_text = response.content[0].text
             logger.info(f"Claude response received for paper {paper.id}, parsing JSON...")
-            
-            # Strip markdown code fences if present
-            response_text = response_text.strip()
-            if response_text.startswith("```"):
-                # Remove opening fence (```json or ```)
-                lines = response_text.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                # Remove closing fence
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                response_text = "\n".join(lines)
-            
             analysis = json.loads(response_text)
             logger.info(f"JSON parsed successfully for paper {paper.id}")
             

@@ -18,22 +18,26 @@ Facility name mentioned in paper: {facility_name}
 Search results:
 {search_results}
 
-Extract ONLY factual information that is clearly stated in the search results. If information is not found, use null.
-
-Respond with JSON:
-{{
-    "official_name": "Full official name of the facility" or null,
-    "aliases": ["Known abbreviations or alternate names"] or [],
-    "country": "Country" or null,
-    "city": "City" or null,
-    "bsl_level": 1-4 integer or null (ONLY if explicitly stated),
-    "notes": "Brief factual notes about the facility" or null,
-    "source_urls": ["URLs where this info was found"] or [],
-    "confidence": "high" | "medium" | "low",
-    "found": true | false
-}}
-
+Extract ONLY factual information that is clearly stated in the search results. 
 IMPORTANT: Only report BSL levels that are explicitly stated in search results. Do not guess or infer BSL levels."""
+
+
+# JSON Schema for facility research structured output
+FACILITY_RESEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "found": {"type": "boolean", "description": "Whether facility information was found"},
+        "official_name": {"type": ["string", "null"], "description": "Full official name of the facility"},
+        "aliases": {"type": "array", "items": {"type": "string"}, "description": "Known abbreviations or alternate names"},
+        "country": {"type": ["string", "null"], "description": "Country where facility is located"},
+        "city": {"type": ["string", "null"], "description": "City where facility is located"},
+        "bsl_level": {"type": ["integer", "null"], "minimum": 1, "maximum": 4, "description": "BSL level if explicitly stated"},
+        "notes": {"type": ["string", "null"], "description": "Brief factual notes about the facility"},
+        "source_urls": {"type": "array", "items": {"type": "string"}, "description": "URLs where info was found"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"], "description": "Confidence in the extracted information"}
+    },
+    "required": ["found", "aliases", "source_urls", "confidence"]
+}
 
 
 class FacilityResearcher:
@@ -124,7 +128,7 @@ class FacilityResearcher:
         
         search_text = "\n---\n".join(formatted_results)
         
-        # Use LLM to extract facility information
+        # Use LLM with structured output to extract facility information
         try:
             response = self.client.messages.create(
                 model=settings.claude_model,
@@ -136,6 +140,19 @@ class FacilityResearcher:
                         search_results=search_text,
                     )
                 }],
+                extra_headers={
+                    "anthropic-beta": "structured-outputs-2025-11-13"
+                },
+                extra_body={
+                    "output_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "facility_research",
+                            "schema": FACILITY_RESEARCH_SCHEMA,
+                            "strict": True
+                        }
+                    }
+                }
             )
             
             result = json.loads(response.content[0].text)
@@ -183,7 +200,7 @@ class FacilityResearcher:
         Returns:
             List of researched facility information
         """
-        # Use LLM to extract facility names
+        # Use LLM with structured output to extract facility names
         try:
             response = self.client.messages.create(
                 model=settings.claude_model,
@@ -196,16 +213,35 @@ Only extract organizations that appear to be conducting the research.
 Text:
 {text[:5000]}
 
-Respond with ONLY a JSON array of facility names, no other text:
-["Facility Name 1", "Facility Name 2"]
-
-If no facilities are clearly identified, respond with just: []
-
-IMPORTANT: Respond with ONLY the JSON array, nothing else."""
+Return the facility names found."""
                 }],
+                extra_headers={
+                    "anthropic-beta": "structured-outputs-2025-11-13"
+                },
+                extra_body={
+                    "output_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "facility_extraction",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "facilities": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "List of facility/institution names found"
+                                    }
+                                },
+                                "required": ["facilities"]
+                            },
+                            "strict": True
+                        }
+                    }
+                }
             )
             
-            facility_names = json.loads(response.content[0].text)
+            result = json.loads(response.content[0].text)
+            facility_names = result.get("facilities", [])
             
             # Research each facility
             results = []
