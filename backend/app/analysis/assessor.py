@@ -32,6 +32,9 @@ Evaluate research papers for potential biosecurity concerns across these dimensi
 1. **Pathogen Risk**: Identify dangerous pathogens mentioned (WHO priority pathogens, CDC Select Agents, novel/engineered organisms)
 2. **Gain-of-Function (GoF)**: Identify research that enhances pathogen capabilities (transmissibility, virulence, host range, immune evasion)
 3. **Containment Adequacy**: Assess if the research appears to be conducted at appropriate biosafety levels
+   - Reference specific facilities mentioned in the paper or provided in the facility context
+   - Note the source of containment information (paper text, author affiliations, our database)
+   - Flag if stated BSL level appears inadequate for the pathogens involved
 4. **Dual-Use Concern**: Evaluate if methodology could be misused by bad actors
 
 Be thorough but balanced. Most pathogen research is legitimate and beneficial. Focus on identifying genuinely concerning elements that warrant expert human review.
@@ -90,9 +93,23 @@ ASSESSMENT_SCHEMA = {
             "properties": {
                 "score": {"type": "integer"},
                 "concerns": {"type": "array", "items": {"type": "string"}},
+                "facilities_referenced": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "name": {"type": "string"},
+                            "stated_bsl": {"type": "string"},
+                            "adequate_for_work": {"type": "boolean"},
+                            "source": {"type": "string"}
+                        },
+                        "required": ["name", "stated_bsl", "adequate_for_work", "source"]
+                    }
+                },
                 "rationale": {"type": "string"}
             },
-            "required": ["score", "concerns", "rationale"]
+            "required": ["score", "concerns", "facilities_referenced", "rationale"]
         },
         "dual_use_analysis": {
             "type": "object",
@@ -140,25 +157,35 @@ class BiosecurityAssessor:
         self.facility_researcher = FacilityResearcher(db) if settings.auto_research_facilities else None
     
     def _get_facility_context(self, paper: Paper) -> str:
-        """Get facility context if available from entities."""
+        """Get facility context if available from entities, with source references."""
         entities = self.db.query(ExtractedEntity).filter(
             ExtractedEntity.paper_id == paper.id,
             ExtractedEntity.entity_type == "facility"
         ).all()
         
         if not entities:
-            return ""
+            return "**Facility Information**: No facilities identified yet. Please extract facility names from the paper and assess containment based on what is stated in the abstract/text."
         
-        context_parts = ["**Known Facility Information**:"]
+        context_parts = ["**Known Facility Information** (from our database):"]
         for entity in entities:
             if entity.facility:
                 facility = entity.facility
+                verification_status = "✓ Verified" if facility.verified else "Unverified"
+                source_info = f" [Source: {facility.source_url}]" if facility.source_url else " [Source: AI-researched]"
+                bsl_info = f"BSL-{facility.bsl_level}" if facility.bsl_level else "BSL level unknown"
+                
                 context_parts.append(
-                    f"- {facility.name}: BSL-{facility.bsl_level or 'Unknown'}, "
-                    f"{facility.country or 'Unknown location'}"
+                    f"- **{facility.name}** ({verification_status})\n"
+                    f"    - Containment: {bsl_info}\n"
+                    f"    - Location: {facility.city or ''}{', ' if facility.city and facility.country else ''}{facility.country or 'Unknown'}\n"
+                    f"    - Reference: {source_info}"
                 )
+                if facility.notes:
+                    context_parts.append(f"    - Notes: {facility.notes}")
             else:
-                context_parts.append(f"- {entity.entity_value} (unverified)")
+                context_parts.append(f"- {entity.entity_value} (mentioned in paper, not yet researched)")
+        
+        context_parts.append("\nWhen assessing containment, cite which facility information informed your assessment and note any discrepancies between stated containment and pathogen requirements.")
         
         return "\n".join(context_parts)
     

@@ -122,6 +122,34 @@ export function AssessmentDetail({ assessment }: AssessmentDetailProps) {
               <div>
                 <h4 className="font-medium text-muted-foreground">Containment Analysis</h4>
                 <p className="mt-1">{rationale.containment_analysis.rationale}</p>
+                
+                {/* Facility References */}
+                {rationale.containment_analysis.facilities_referenced?.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Facilities Referenced</h5>
+                    <div className="space-y-2">
+                      {rationale.containment_analysis.facilities_referenced.map((facility: any, idx: number) => (
+                        <div key={idx} className="rounded-lg bg-muted/50 p-3 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{facility.name}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              facility.adequate_for_work 
+                                ? 'bg-green-500/20 text-green-700 dark:text-green-400' 
+                                : 'bg-red-500/20 text-red-700 dark:text-red-400'
+                            }`}>
+                              {facility.adequate_for_work ? '✓ Adequate' : '⚠ Concern'}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-muted-foreground">
+                            <span>BSL: {facility.stated_bsl}</span>
+                            <span className="mx-2">•</span>
+                            <span>Source: {facility.source}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {rationale.dual_use_analysis?.rationale && (
