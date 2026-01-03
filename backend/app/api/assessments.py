@@ -2,11 +2,19 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from datetime import datetime
 
 from ..database import get_db
 from ..models import Assessment, Paper
+
+
+def get_latest_assessment_ids(db: Session):
+    """Get subquery for latest assessment ID per paper."""
+    return db.query(
+        func.max(Assessment.id).label('id')
+    ).group_by(Assessment.paper_id).subquery()
 
 router = APIRouter()
 
@@ -60,8 +68,12 @@ async def list_assessments(
     min_score: Optional[float] = None,
     db: Session = Depends(get_db),
 ):
-    """List all assessments with pagination."""
-    query = db.query(Assessment).join(Paper)
+    """List all assessments with pagination (only latest assessment per paper)."""
+    # Get only the latest assessment per paper
+    latest_ids = get_latest_assessment_ids(db)
+    query = db.query(Assessment).join(Paper).join(
+        latest_ids, Assessment.id == latest_ids.c.id
+    )
     
     if risk_grade:
         query = query.filter(Assessment.risk_grade == risk_grade.upper())
@@ -107,8 +119,11 @@ async def list_assessments(
 
 @router.get("/flagged", response_model=List[AssessmentWithPaperResponse])
 async def get_flagged_assessments(db: Session = Depends(get_db)):
-    """Get all flagged assessments (high-risk papers)."""
-    results = db.query(Assessment).join(Paper).filter(Assessment.flagged == True).order_by(Assessment.overall_score.desc()).all()
+    """Get all flagged assessments (high-risk papers, only latest assessment per paper)."""
+    latest_ids = get_latest_assessment_ids(db)
+    results = db.query(Assessment).join(Paper).join(
+        latest_ids, Assessment.id == latest_ids.c.id
+    ).filter(Assessment.flagged == True).order_by(Assessment.overall_score.desc()).all()
     
     assessments = []
     for assessment in results:
@@ -155,25 +170,29 @@ async def get_paper_assessments(paper_id: int, db: Session = Depends(get_db)):
 
 @router.get("/stats/summary")
 async def get_assessment_stats(db: Session = Depends(get_db)):
-    """Get assessment statistics."""
-    total = db.query(Assessment).count()
-    flagged = db.query(Assessment).filter(Assessment.flagged == True).count()
+    """Get assessment statistics (only counting latest assessment per paper)."""
+    # Get only the latest assessment per paper
+    latest_ids = get_latest_assessment_ids(db)
+    base_query = db.query(Assessment).join(latest_ids, Assessment.id == latest_ids.c.id)
+    
+    total = base_query.count()
+    flagged = base_query.filter(Assessment.flagged == True).count()
     
     # Count by grade
     by_grade = {}
     for grade in ["A", "B", "C", "D", "F"]:
-        count = db.query(Assessment).filter(Assessment.risk_grade == grade).count()
+        count = base_query.filter(Assessment.risk_grade == grade).count()
         by_grade[grade] = count
     
-    # Average scores
-    from sqlalchemy import func
+    # Average scores (need fresh subquery for aggregate)
+    latest_ids_agg = get_latest_assessment_ids(db)
     avg_scores = db.query(
         func.avg(Assessment.overall_score),
         func.avg(Assessment.pathogen_score),
         func.avg(Assessment.gof_score),
         func.avg(Assessment.containment_score),
         func.avg(Assessment.dual_use_score),
-    ).first()
+    ).join(latest_ids_agg, Assessment.id == latest_ids_agg.c.id).first()
     
     return {
         "total": total,
