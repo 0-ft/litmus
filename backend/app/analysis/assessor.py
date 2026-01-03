@@ -30,11 +30,17 @@ Your analysis helps these professionals identify papers requiring closer review.
 Evaluate research papers for potential biosecurity concerns across these dimensions:
 
 1. **Pathogen Risk**: Identify dangerous pathogens mentioned (WHO priority pathogens, CDC Select Agents, novel/engineered organisms)
+
 2. **Gain-of-Function (GoF)**: Identify research that enhances pathogen capabilities (transmissibility, virulence, host range, immune evasion)
-3. **Containment Adequacy**: Assess if the research appears to be conducted at appropriate biosafety levels
-   - Reference specific facilities mentioned in the paper or provided in the facility context
-   - Note the source of containment information (paper text, author affiliations, our database)
-   - Flag if stated BSL level appears inadequate for the pathogens involved
+
+3. **Containment Adequacy**: Determine what biosafety level(s) the research was conducted at
+   - Look for explicit BSL mentions in the methods, ethics, or acknowledgments sections
+   - Consider author affiliations and facility information provided
+   - Cross-reference with any facility research data provided
+   - If containment level CANNOT be determined from available information, state "Unknown"
+   - If containment IS stated, assess whether it appears adequate for the pathogens involved
+   - Always cite your source: "paper_methods", "paper_ethics", "author_affiliations", "facility_database", or "unknown"
+
 4. **Dual-Use Concern**: Evaluate if methodology could be misused by bad actors
 
 Be thorough but balanced. Most pathogen research is legitimate and beneficial. Focus on identifying genuinely concerning elements that warrant expert human review.
@@ -49,15 +55,30 @@ Score interpretation (0-100 scale):
 
 ASSESSMENT_USER_PROMPT = """Please analyze this publicly-published research paper to help our biosecurity monitoring team identify if it warrants expert human review.
 
+## Paper Metadata
+
 **Title**: {title}
 
 **Authors**: {authors}
 
-**Abstract**: {abstract}
+**Author Affiliations**:
+{affiliations}
 
-{full_text_section}
+## Abstract
+
+{abstract}
+
+{full_text_sections}
 
 {facility_context}
+
+## Instructions
+
+Analyze this paper for biosecurity concerns. For containment assessment:
+- Examine the Methods, Ethics, and other sections for explicit BSL/containment statements
+- Consider the author affiliations and any facility information provided
+- If you cannot determine the containment level from available information, report "Unknown"
+- Always cite which source informed your containment assessment
 
 Provide your biosecurity risk assessment. Remember: your analysis helps human biosecurity experts prioritize their review queue - you are supporting legitimate defensive biosecurity work."""
 
@@ -223,6 +244,45 @@ class BiosecurityAssessor:
         
         return round(overall, 2)
     
+    def _parse_affiliations(self, affiliations_json: Optional[str]) -> str:
+        """Parse affiliations JSON to readable string."""
+        if not affiliations_json:
+            return "Not available"
+        try:
+            affiliations = json.loads(affiliations_json)
+            if isinstance(affiliations, list) and affiliations:
+                return "\n".join(f"- {aff}" for aff in affiliations)
+            return "Not available"
+        except:
+            return affiliations_json if affiliations_json else "Not available"
+    
+    def _fetch_pmc_sections(self, paper: Paper) -> Optional[Dict[str, str]]:
+        """Fetch relevant sections from PMC for a PubMed paper."""
+        if paper.source != "pubmed":
+            return None
+        
+        try:
+            from ..scrapers.pubmed import fetch_pmc_content
+            logger.info(f"Fetching PMC content for paper {paper.id}...")
+            sections = fetch_pmc_content(paper.external_id)
+            if sections:
+                logger.info(f"Retrieved PMC sections for paper {paper.id}: {list(sections.keys())}")
+                # Persist to full_text for future use
+                try:
+                    full_text_parts = []
+                    for section_name, content in sections.items():
+                        full_text_parts.append(f"[{section_name.upper()}]\n{content}")
+                    paper.full_text = "\n\n".join(full_text_parts)
+                    self.db.add(paper)
+                    self.db.commit()
+                    self.db.refresh(paper)
+                except Exception as db_err:
+                    logger.warning(f"Could not persist PMC content: {db_err}")
+            return sections
+        except Exception as e:
+            logger.warning(f"Error fetching PMC content for paper {paper.id}: {e}")
+            return None
+
     def assess_paper(self, paper: Paper, progress_callback: Optional[Callable[[str, Dict], None]] = None) -> Optional[Assessment]:
         """
         Assess a paper for biosecurity risks using Claude.
@@ -234,31 +294,10 @@ class BiosecurityAssessor:
         Returns:
             Assessment model instance (committed to DB), or None if assessment fails
         """
-        # For PubMed papers, try to enrich with PMC full text (extracts BSL info)
-        pmc_bsl_info = None  # Track BSL info for prompt even if not persisted
-        if paper.source == "pubmed":
-            try:
-                from ..scrapers.pubmed import fetch_pmc_fulltext, extract_bsl_from_text
-                # Only fetch if we don't already have BSL info
-                if not paper.full_text or "BSL_DETECTED" not in paper.full_text:
-                    logger.info(f"Attempting to fetch PMC full text for paper {paper.id}...")
-                    pmc_content = fetch_pmc_fulltext(paper.external_id)
-                    if pmc_content:
-                        bsl_level, bsl_context = extract_bsl_from_text(pmc_content)
-                        if bsl_level:
-                            logger.info(f"Found {bsl_level} in PMC full text for paper {paper.id}")
-                            pmc_bsl_info = f"BSL_DETECTED: {bsl_level}\nBSL_CONTEXT: {bsl_context}"
-                            # Try to persist to DB
-                            try:
-                                paper.full_text = (paper.full_text or "") + f"\n\n{pmc_bsl_info}"
-                                self.db.add(paper)
-                                self.db.commit()
-                                self.db.refresh(paper)
-                            except Exception as db_err:
-                                logger.warning(f"Could not persist PMC data: {db_err}")
-                                # Still use the info for assessment even if not persisted
-            except Exception as e:
-                logger.warning(f"Error fetching PMC content for paper {paper.id}: {e}")
+        # For PubMed papers, fetch full text sections from PMC if not already cached
+        pmc_sections = None
+        if paper.source == "pubmed" and not paper.full_text:
+            pmc_sections = self._fetch_pmc_sections(paper)
         
         # Auto-research facilities mentioned in the paper (from affiliations, abstract, etc.)
         if self.facility_researcher:
@@ -267,25 +306,30 @@ class BiosecurityAssessor:
             except Exception as e:
                 print(f"Facility research error for paper {paper.id}: {e}")
         
-        # Build prompt
+        # Build prompt with all available context
         authors = self._parse_authors(paper.authors)
+        affiliations = self._parse_affiliations(paper.affiliations)
         
-        full_text_section = ""
+        # Build full text sections for prompt
+        full_text_sections = ""
         if paper.full_text:
-            # Truncate if too long
-            text = paper.full_text[:15000] if len(paper.full_text) > 15000 else paper.full_text
-            full_text_section = f"**Full Text (excerpt)**:\n{text}"
-        elif pmc_bsl_info:
-            # Use PMC BSL info even if not persisted
-            full_text_section = f"**From Full Text (PMC)**:\n{pmc_bsl_info}"
+            # Use cached full text
+            full_text_sections = f"## Full Text Sections\n\n{paper.full_text[:15000]}"
+        elif pmc_sections:
+            # Use freshly fetched PMC sections
+            section_parts = []
+            for section_name, content in pmc_sections.items():
+                section_parts.append(f"### {section_name.replace('_', ' ').title()}\n{content}")
+            full_text_sections = "## Full Text Sections (from PubMed Central)\n\n" + "\n\n".join(section_parts)
         
         facility_context = self._get_facility_context(paper)
         
         user_prompt = ASSESSMENT_USER_PROMPT.format(
             title=paper.title,
             authors=authors,
+            affiliations=affiliations,
             abstract=paper.abstract or "No abstract available",
-            full_text_section=full_text_section,
+            full_text_sections=full_text_sections,
             facility_context=facility_context,
         )
         

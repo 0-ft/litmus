@@ -2,7 +2,7 @@
 import json
 import re
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
 
 try:
@@ -15,67 +15,44 @@ from ..models import Paper
 from ..config import settings
 
 
-def extract_bsl_from_text(text: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Extract BSL (Biosafety Level) information from text.
-    
-    Returns:
-        Tuple of (bsl_level, context_snippet)
-        bsl_level: "BSL-1", "BSL-2", "BSL-3", "BSL-4", or None
-        context_snippet: The sentence/context where BSL was mentioned
-    """
-    if not text:
-        return None, None
-    
-    # Patterns to match BSL levels
-    patterns = [
-        # "biosafety level 2" or "biosafety level-2"
-        (r'biosafety\s+level[-\s]?(\d)', 'biosafety level'),
-        # "BSL-2" or "BSL2" or "BSL 2"
-        (r'BSL[-\s]?(\d)', 'BSL'),
-        # "ABSL-2" (Animal BSL)
-        (r'ABSL[-\s]?(\d)', 'ABSL'),
-    ]
-    
-    highest_bsl = None
-    best_context = None
-    
-    for pattern, label in patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE):
-            level = int(match.group(1))
-            bsl_str = f"BSL-{level}"
-            
-            # Keep track of highest BSL found
-            if highest_bsl is None or level > int(highest_bsl.split('-')[1]):
-                highest_bsl = bsl_str
-                
-                # Extract context (surrounding text)
-                start = max(0, match.start() - 100)
-                end = min(len(text), match.end() + 100)
-                context = text[start:end]
-                # Clean up XML tags
-                context = re.sub(r'<[^>]+>', '', context)
-                context = re.sub(r'\s+', ' ', context).strip()
-                best_context = f"...{context}..."
-    
-    return highest_bsl, best_context
+def _clean_xml_text(text: str) -> str:
+    """Remove XML tags and normalize whitespace."""
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 
-def fetch_pmc_fulltext(pmid: str) -> Optional[str]:
+def _extract_section(xml_content: str, section_titles: List[str], max_chars: int = 3000) -> Optional[str]:
+    """Extract a section from PMC XML by title patterns."""
+    for title in section_titles:
+        # Look for section with matching title
+        pattern = rf'<sec[^>]*>.*?<title[^>]*>.*?{title}.*?</title>(.*?)</sec>'
+        match = re.search(pattern, xml_content, re.IGNORECASE | re.DOTALL)
+        if match:
+            content = _clean_xml_text(match.group(1))
+            if len(content) > max_chars:
+                content = content[:max_chars] + "..."
+            return content
+    return None
+
+
+def fetch_pmc_content(pmid: str) -> Optional[Dict[str, str]]:
     """
-    Fetch full text from PubMed Central if available.
+    Fetch relevant content sections from PubMed Central.
     
     Args:
         pmid: PubMed ID
         
     Returns:
-        Full text XML content or None if not available
+        Dict with extracted sections (methods, ethics, acknowledgments, etc.)
+        or None if PMC full text not available
     """
     if not BIOPYTHON_AVAILABLE:
         return None
     
     try:
         # First get PMC ID via elink
+        Entrez.email = "litmus@example.com"
         handle = Entrez.elink(dbfrom='pubmed', db='pmc', id=pmid)
         record = Entrez.read(handle)
         handle.close()
@@ -90,13 +67,54 @@ def fetch_pmc_fulltext(pmid: str) -> Optional[str]:
         
         # Fetch full text from PMC
         pmc_handle = Entrez.efetch(db='pmc', id=pmc_ids[0], rettype='xml')
-        content = pmc_handle.read().decode('utf-8')
+        xml_content = pmc_handle.read().decode('utf-8')
         pmc_handle.close()
         
-        return content
+        # Extract relevant sections
+        sections = {}
+        
+        # Methods section - often contains BSL/containment info
+        methods = _extract_section(xml_content, [
+            r'Materials?\s+and\s+Methods?',
+            r'Methods?',
+            r'Experimental\s+Procedures?',
+            r'Study\s+Design',
+        ], max_chars=5000)
+        if methods:
+            sections['methods'] = methods
+        
+        # Ethics/Biosafety section - contains ethics approvals and biosafety statements
+        ethics = _extract_section(xml_content, [
+            r'Ethics',
+            r'Biosafety',
+            r'Ethical\s+Statement',
+            r'Ethics\s+Approval',
+            r'Institutional\s+Review',
+        ], max_chars=2000)
+        if ethics:
+            sections['ethics'] = ethics
+        
+        # Acknowledgments - often mentions funding and facilities
+        ack = _extract_section(xml_content, [
+            r'Acknowledgments?',
+            r'Funding',
+        ], max_chars=1500)
+        if ack:
+            sections['acknowledgments'] = ack
+        
+        # Author contributions/affiliations often in a notes section
+        author_notes = _extract_section(xml_content, [
+            r'Author\s+Contributions?',
+            r'Author\s+Notes?',
+            r'Competing\s+Interests?',
+        ], max_chars=1000)
+        if author_notes:
+            sections['author_notes'] = author_notes
+        
+        return sections if sections else None
         
     except Exception as e:
-        print(f"Error fetching PMC full text for {pmid}: {e}")
+        print(f"Error fetching PMC content for {pmid}: {e}")
         return None
 
 
@@ -358,59 +376,6 @@ class PubmedScraper:
             print(f"Error searching PubMed: {e}")
             return []
     
-    def enrich_with_pmc(self, paper: Paper) -> bool:
-        """
-        Enrich a PubMed paper with PMC full text if available.
-        Extracts BSL information from the full text.
-        
-        Args:
-            paper: Paper to enrich (must be from PubMed)
-            
-        Returns:
-            True if paper was enriched, False otherwise
-        """
-        if paper.source != "pubmed":
-            return False
-        
-        # Already has full text?
-        if paper.full_text and len(paper.full_text) > 1000:
-            return False
-        
-        pmid = paper.external_id
-        pmc_content = fetch_pmc_fulltext(pmid)
-        
-        if not pmc_content:
-            return False
-        
-        # Extract BSL info
-        bsl_level, bsl_context = extract_bsl_from_text(pmc_content)
-        
-        # Store a summarized version of the full text (too big to store raw XML)
-        # Extract just the methods section or relevant parts
-        methods_match = re.search(
-            r'<sec[^>]*>.*?<title[^>]*>.*?(Materials?\s+and\s+Methods?|Methods?).*?</title>.*?</sec>',
-            pmc_content,
-            re.IGNORECASE | re.DOTALL
-        )
-        
-        full_text_parts = []
-        if methods_match:
-            methods_text = re.sub(r'<[^>]+>', ' ', methods_match.group())
-            methods_text = re.sub(r'\s+', ' ', methods_text).strip()
-            full_text_parts.append(f"METHODS: {methods_text[:5000]}")
-        
-        if bsl_level:
-            full_text_parts.append(f"BSL_DETECTED: {bsl_level}")
-            if bsl_context:
-                full_text_parts.append(f"BSL_CONTEXT: {bsl_context}")
-        
-        if full_text_parts:
-            paper.full_text = "\n\n".join(full_text_parts)
-            self.db.commit()
-            return True
-        
-        return False
-
     def fetch_and_store(
         self,
         max_results: int = None,
