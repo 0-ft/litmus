@@ -10,6 +10,7 @@ import {
   Building2,
   RefreshCw,
   AlertTriangle,
+  FlaskConical,
 } from "lucide-react";
 
 const navigation = [
@@ -18,6 +19,7 @@ const navigation = [
   { name: "Assessments", href: "/assessments", icon: ShieldAlert },
   { name: "Flagged", href: "/flagged", icon: AlertTriangle },
   { name: "Facilities", href: "/facilities", icon: Building2 },
+  { name: "Evaluation", href: "/evaluation", icon: FlaskConical },
   { name: "Scan", href: "/scan", icon: RefreshCw },
 ];
 

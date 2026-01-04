@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .api import papers, assessments, facilities, scan
+from .api import papers, assessments, facilities, scan, reference_assessments
 
 # Create FastAPI app
 app = FastAPI(
@@ -26,6 +26,7 @@ app.include_router(papers.router, prefix="/api/papers", tags=["papers"])
 app.include_router(assessments.router, prefix="/api/assessments", tags=["assessments"])
 app.include_router(facilities.router, prefix="/api/facilities", tags=["facilities"])
 app.include_router(scan.router, prefix="/api/scan", tags=["scan"])
+app.include_router(reference_assessments.router, prefix="/api/reference", tags=["reference"])
 
 
 @app.on_event("startup")

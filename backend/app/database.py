@@ -38,7 +38,7 @@ def get_db():
 def init_db():
     """Initialize database tables."""
     # Import all models to ensure they're registered with Base
-    from .models import paper, assessment, facility
+    from .models import paper, assessment, facility, reference_assessment
     
     # Create all tables
     Base.metadata.create_all(bind=engine)

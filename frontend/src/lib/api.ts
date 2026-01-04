@@ -165,6 +165,103 @@ export interface FetchPaperResponse {
   already_exists: boolean;
 }
 
+// Reference Assessment types
+export interface FacilityInfo {
+  name: string;
+  bsl_level: string;
+}
+
+export interface ReferenceAssessment {
+  id: number;
+  paper_id: number;
+  created_by: string | null;
+  overall_score: number;
+  pathogen_score: number;
+  gof_score: number;
+  containment_score: number;
+  dual_use_score: number;
+  pathogens_identified: string[] | null;
+  research_facilities: FacilityInfo[] | null;
+  stated_bsl: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  paper_title?: string;
+  paper_source?: string;
+  paper_external_id?: string;
+}
+
+export interface ReferenceAssessmentCreate {
+  paper_id: number;
+  created_by?: string;
+  overall_score: number;
+  pathogen_score: number;
+  gof_score: number;
+  containment_score: number;
+  dual_use_score: number;
+  pathogens_identified?: string[];
+  research_facilities?: FacilityInfo[];
+  stated_bsl?: string;
+  notes?: string;
+}
+
+export interface ScoreComparison {
+  ai_score: number;
+  reference_score: number;
+  difference: number;
+  absolute_error: number;
+}
+
+export interface ComparisonResult {
+  paper_id: number;
+  paper_title: string;
+  ai_assessment_id: number;
+  reference_assessment_id: number;
+  overall: ScoreComparison;
+  pathogen: ScoreComparison;
+  gof: ScoreComparison;
+  containment: ScoreComparison;
+  dual_use: ScoreComparison;
+  pathogens_ai: string[];
+  pathogens_reference: string[];
+  pathogens_matched: string[];
+  pathogens_missed: string[];
+  pathogens_extra: string[];
+  pathogen_precision: number;
+  pathogen_recall: number;
+  pathogen_f1: number;
+  facilities_ai: FacilityInfo[];
+  facilities_reference: FacilityInfo[];
+  facilities_matched: string[];
+  facilities_missed: string[];
+  facilities_extra: string[];
+  facility_precision: number;
+  facility_recall: number;
+  facility_f1: number;
+  bsl_ai: string | null;
+  bsl_reference: string | null;
+  bsl_match: boolean;
+}
+
+export interface AggregateMetrics {
+  num_papers: number;
+  mean_absolute_error: Record<string, number>;
+  mean_signed_error: Record<string, number>;
+  score_correlation: Record<string, number>;
+  avg_pathogen_precision: number;
+  avg_pathogen_recall: number;
+  avg_pathogen_f1: number;
+  avg_facility_precision: number;
+  avg_facility_recall: number;
+  avg_facility_f1: number;
+  bsl_accuracy: number;
+}
+
+export interface FullComparisonResponse {
+  comparisons: ComparisonResult[];
+  aggregate: AggregateMetrics;
+}
+
 // Scan API
 export const scanApi = {
   arxiv: (maxResults = 100) =>
@@ -207,5 +304,37 @@ export const scanApi = {
       pathogens?: string[];
       already_assessed: boolean;
     }>(`/api/scan/assess-paper/${paperId}?force=${force}`, { method: "POST" }),
+};
+
+// Reference Assessments API
+export const referenceApi = {
+  list: () =>
+    fetchApi<ReferenceAssessment[]>(`/api/reference/`),
+  
+  forPaper: (paperId: number) =>
+    fetchApi<ReferenceAssessment>(`/api/reference/paper/${paperId}`),
+  
+  create: (data: ReferenceAssessmentCreate) =>
+    fetchApi<ReferenceAssessment>(`/api/reference/`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  
+  update: (paperId: number, data: Partial<ReferenceAssessmentCreate>) =>
+    fetchApi<ReferenceAssessment>(`/api/reference/paper/${paperId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  
+  delete: (paperId: number) =>
+    fetchApi<{ message: string }>(`/api/reference/paper/${paperId}`, {
+      method: "DELETE",
+    }),
+  
+  compare: () =>
+    fetchApi<FullComparisonResponse>(`/api/reference/compare`),
+  
+  compareOne: (paperId: number) =>
+    fetchApi<ComparisonResult>(`/api/reference/compare/paper/${paperId}`),
 };
 

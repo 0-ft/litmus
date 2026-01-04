@@ -50,6 +50,7 @@ class Paper(Base):
     # Relationships
     assessments = relationship("Assessment", back_populates="paper", cascade="all, delete-orphan")
     entities = relationship("ExtractedEntity", back_populates="paper", cascade="all, delete-orphan")
+    reference_assessment = relationship("ReferenceAssessment", back_populates="paper", uselist=False, cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Paper {self.source}:{self.external_id} - {self.title[:50]}...>"
