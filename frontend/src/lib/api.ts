@@ -343,3 +343,81 @@ export const referenceApi = {
     fetchApi<ComparisonResult>(`/api/reference/compare/paper/${paperId}`),
 };
 
+// Queue types
+export interface QueueItem {
+  id: number;
+  paper_id: number;
+  paper_title: string | null;
+  status: "pending" | "processing" | "completed" | "failed";
+  priority: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  result_grade: string | null;
+  result_score: number | null;
+  result_flagged: boolean | null;
+}
+
+export interface QueueStatus {
+  worker_running: boolean;
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  total: number;
+  current: {
+    item_id: number;
+    paper_id: number;
+    paper_title: string;
+    started_at: string | null;
+  } | null;
+}
+
+export interface AddToQueueResponse {
+  message: string;
+  added: number;
+  already_queued: number;
+}
+
+// Queue API
+export const queueApi = {
+  status: () =>
+    fetchApi<QueueStatus>(`/api/queue/status`),
+  
+  items: (status?: string, limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (status) params.append("status", status);
+    return fetchApi<QueueItem[]>(`/api/queue/items?${params}`);
+  },
+  
+  addPaper: (paperId: number, priority = 5) =>
+    fetchApi<AddToQueueResponse>(`/api/queue/add/${paperId}?priority=${priority}`, {
+      method: "POST",
+    }),
+  
+  addAllUnassessed: (priority = 10) =>
+    fetchApi<AddToQueueResponse>(`/api/queue/add`, {
+      method: "POST",
+      body: JSON.stringify({ add_all_unassessed: true, priority }),
+    }),
+  
+  addPapers: (paperIds: number[], priority = 10) =>
+    fetchApi<AddToQueueResponse>(`/api/queue/add`, {
+      method: "POST",
+      body: JSON.stringify({ paper_ids: paperIds, priority }),
+    }),
+  
+  cancel: (itemId: number) =>
+    fetchApi<{ message: string }>(`/api/queue/cancel/${itemId}`, {
+      method: "DELETE",
+    }),
+  
+  clear: (status?: string) => {
+    const params = status ? `?status=${status}` : "";
+    return fetchApi<{ message: string; removed: number }>(`/api/queue/clear${params}`, {
+      method: "DELETE",
+    });
+  },
+};
+

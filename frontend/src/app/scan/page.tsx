@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { scanApi } from "@/lib/api";
+import { useState, useCallback, useEffect } from "react";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
+import { scanApi, queueApi, QueueStatus, QueueItem } from "@/lib/api";
 import {
   RefreshCw,
   FileText,
@@ -15,6 +15,11 @@ import {
   XCircle,
   Link,
   Trash2,
+  ListOrdered,
+  Clock,
+  Play,
+  Pause,
+  X,
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -44,26 +49,21 @@ interface ScanProgress {
   currentMessage: string;
 }
 
-interface AssessedPaper {
-  paper_id: number;
-  title: string;
-  risk_grade: string;
-  overall_score: number;
-  flagged: boolean;
-  flag_reason?: string;
+interface QueueEvent {
+  type: string;
+  item_id?: number;
+  paper_id?: number;
+  paper_title?: string;
+  status?: string;
+  risk_grade?: string;
+  overall_score?: number;
+  flagged?: boolean;
   concerns_summary?: string;
-  pathogens: string[];
-}
-
-interface AssessProgress {
-  isAssessing: boolean;
-  currentPaper: string;
-  progress: string;
-  assessed: number;
-  flagged: number;
-  totalPapers: number;
-  currentMessage: string;
-  completedPapers: AssessedPaper[];
+  error?: string;
+  pending?: number;
+  processing?: number;
+  added?: number;
+  removed?: number;
 }
 
 const initialSourceProgress: SourceProgress = {
@@ -84,147 +84,161 @@ const initialProgress: ScanProgress = {
   currentMessage: "",
 };
 
-const initialAssessProgress: AssessProgress = {
-  isAssessing: false,
-  currentPaper: "",
-  progress: "",
-  assessed: 0,
-  flagged: 0,
-  totalPapers: 0,
-  currentMessage: "",
-  completedPapers: [],
-};
 
 export default function ScanPage() {
   const queryClient = useQueryClient();
   const [results, setResults] = useState<ScanResult[]>([]);
   const [scanProgress, setScanProgress] = useState<ScanProgress>(initialProgress);
-  const [assessProgress, setAssessProgress] = useState<AssessProgress>(initialAssessProgress);
+  
+  // Queue state
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
+  const [recentItems, setRecentItems] = useState<QueueItem[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
 
   const addResult = (result: ScanResult) => {
     setResults((prev) => [...prev, result]);
   };
 
-  const startStreamingAssess = useCallback(async () => {
-    // Reset progress
-    setAssessProgress({
-      ...initialAssessProgress,
-      isAssessing: true,
-      currentMessage: "Connecting...",
-    });
+  // Fetch initial queue status and items
+  const { data: statusData, refetch: refetchStatus } = useQuery({
+    queryKey: ["queue-status"],
+    queryFn: queueApi.status,
+    refetchInterval: false,  // We use SSE for real-time updates
+  });
 
-    try {
-      // Assess all unprocessed papers (limit=500 is effectively "all")
-      const response = await fetch(`${API_BASE}/api/scan/assess/stream?limit=500`);
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
+  const { data: itemsData, refetch: refetchItems } = useQuery({
+    queryKey: ["queue-items"],
+    queryFn: () => queueApi.items(undefined, 20),
+    refetchInterval: false,
+  });
 
-      if (!reader) {
-        throw new Error("Failed to get stream reader");
-      }
+  // Update state when data changes
+  useEffect(() => {
+    if (statusData) setQueueStatus(statusData);
+  }, [statusData]);
 
-      let buffer = "";
+  useEffect(() => {
+    if (itemsData) setRecentItems(itemsData);
+  }, [itemsData]);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+  // SSE connection for real-time queue updates
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+    const connect = () => {
+      eventSource = new EventSource(`${API_BASE}/api/queue/stream`);
+      
+      eventSource.onopen = () => {
+        setIsConnected(true);
+      };
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              setAssessProgress((prev) => {
-                const newProgress = { ...prev };
+      eventSource.onmessage = (event) => {
+        try {
+          const data: QueueEvent = JSON.parse(event.data);
+          
+          if (data.type === "status" || data.type === "heartbeat") {
+            if (data.type === "status") {
+              setQueueStatus(data as unknown as QueueStatus);
+            }
+            return;
+          }
 
-                if (data.message) {
-                  newProgress.currentMessage = data.message;
-                }
+          // Update queue status based on events
+          if (data.type === "queue_updated" || data.type === "queue_cleared" || data.type === "item_cancelled") {
+            refetchStatus();
+            refetchItems();
+          }
 
-                if (data.total_papers !== undefined) {
-                  newProgress.totalPapers = data.total_papers;
-                }
+          // Processing started
+          if (data.type === "processing") {
+            setQueueStatus((prev) => prev ? {
+              ...prev,
+              processing: 1,
+              pending: Math.max(0, prev.pending - 1),
+              current: {
+                item_id: data.item_id!,
+                paper_id: data.paper_id!,
+                paper_title: data.paper_title || "Unknown",
+                started_at: new Date().toISOString(),
+              },
+            } : null);
+          }
 
-                // Paper starting assessment
-                if (data.title && data.progress && !data.risk_grade) {
-                  newProgress.currentPaper = data.title;
-                  newProgress.progress = data.progress;
-                }
-
-                // Paper completed assessment
-                if (data.risk_grade !== undefined) {
-                  newProgress.completedPapers = [
-                    ...prev.completedPapers,
-                    {
-                      paper_id: data.paper_id,
-                      title: data.title,
-                      risk_grade: data.risk_grade,
-                      overall_score: data.overall_score,
-                      flagged: data.flagged,
-                      flag_reason: data.flag_reason,
-                      concerns_summary: data.concerns_summary,
-                      pathogens: data.pathogens || [],
-                    },
-                  ];
-                  newProgress.assessed = data.assessed_so_far || prev.assessed + 1;
-                  newProgress.flagged = data.flagged_so_far || prev.flagged;
-                  newProgress.progress = data.progress;
-                  newProgress.currentPaper = "";
-                }
-
-                // Paper error
-                if (data.error && data.paper_id) {
-                  newProgress.currentPaper = "";
-                }
-
-                // Complete event
-                if (data.assessed !== undefined && data.flagged !== undefined && !data.paper_id) {
-                  newProgress.isAssessing = false;
-                  newProgress.assessed = data.assessed;
-                  newProgress.flagged = data.flagged;
-                }
-
-                return newProgress;
+          // Completed or failed
+          if (data.type === "completed" || data.type === "failed") {
+            refetchStatus();
+            refetchItems();
+            queryClient.invalidateQueries({ queryKey: ["assessments"] });
+            queryClient.invalidateQueries({ queryKey: ["papers"] });
+            queryClient.invalidateQueries({ queryKey: ["flagged"] });
+            
+            // Add result notification
+            if (data.type === "completed") {
+              addResult({
+                success: true,
+                message: `Assessed: ${data.paper_title?.substring(0, 50)}... (Grade: ${data.risk_grade})`,
               });
-            } catch (e) {
-              // Ignore parse errors
+            } else {
+              addResult({
+                success: false,
+                message: `Failed: ${data.paper_title?.substring(0, 50)}... - ${data.error}`,
+              });
             }
           }
+        } catch (e) {
+          // Ignore parse errors
         }
-      }
+      };
 
-      // Assessment complete
-      setAssessProgress((prev) => ({
-        ...prev,
-        isAssessing: false,
-      }));
-      
-      queryClient.invalidateQueries({ queryKey: ["assessments"] });
-      queryClient.invalidateQueries({ queryKey: ["assessment-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["flagged"] });
-      queryClient.invalidateQueries({ queryKey: ["papers"] });
-      
+      eventSource.onerror = () => {
+        setIsConnected(false);
+        eventSource?.close();
+        // Reconnect after 3 seconds
+        reconnectTimeout = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      eventSource?.close();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    };
+  }, [refetchStatus, refetchItems, queryClient]);
+
+  // Add all unassessed papers to queue
+  const addAllToQueue = useMutation({
+    mutationFn: () => queueApi.addAllUnassessed(),
+    onSuccess: (data) => {
       addResult({
         success: true,
-        message: `Assessment complete!`,
+        message: data.message,
+        count: data.added,
       });
-
-    } catch (error) {
-      setAssessProgress((prev) => ({
-        ...prev,
-        isAssessing: false,
-        currentMessage: `Error: ${error}`,
-      }));
+      refetchStatus();
+      refetchItems();
+    },
+    onError: (error) => {
       addResult({
         success: false,
-        message: `Assessment failed: ${error}`,
+        message: `Failed to add papers to queue: ${error}`,
       });
-    }
-  }, [queryClient]);
+    },
+  });
+
+  // Clear completed items from queue
+  const clearQueue = useMutation({
+    mutationFn: () => queueApi.clear(),
+    onSuccess: (data) => {
+      addResult({
+        success: true,
+        message: data.message,
+      });
+      refetchStatus();
+      refetchItems();
+    },
+  });
 
   const startStreamingScan = useCallback(async () => {
     // Reset progress
@@ -393,23 +407,6 @@ export default function ScanPage() {
     },
   });
 
-  const assessPapers = useMutation({
-    mutationFn: () => scanApi.assess(10),
-    onSuccess: (data) => {
-      addResult({
-        success: true,
-        message: data.message,
-        count: data.papers_assessed,
-      });
-      queryClient.invalidateQueries({ queryKey: ["assessments"] });
-      queryClient.invalidateQueries({ queryKey: ["assessment-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["flagged"] });
-    },
-    onError: (error) => {
-      addResult({ success: false, message: `Assessment failed: ${error}` });
-    },
-  });
-
   const [facilitySearch, setFacilitySearch] = useState("");
   const [paperUrl, setPaperUrl] = useState("");
   
@@ -459,8 +456,6 @@ export default function ScanPage() {
         message: data.message,
         count: data.assessments_deleted,
       });
-      // Reset the assessment progress display
-      setAssessProgress(initialAssessProgress);
       // Invalidate all related queries
       queryClient.invalidateQueries({ queryKey: ["assessments"] });
       queryClient.invalidateQueries({ queryKey: ["assessment-stats"] });
@@ -468,6 +463,8 @@ export default function ScanPage() {
       queryClient.invalidateQueries({ queryKey: ["papers"] });
       queryClient.invalidateQueries({ queryKey: ["paper-stats"] });
       queryClient.invalidateQueries({ queryKey: ["comparison"] });
+      // Also clear the queue
+      clearQueue.mutate();
     },
     onError: (error) => {
       addResult({
@@ -488,8 +485,7 @@ export default function ScanPage() {
     scanBiorxiv.isPending ||
     scanPubmed.isPending ||
     scanProgress.isScanning ||
-    assessProgress.isAssessing ||
-    assessPapers.isPending ||
+    addAllToQueue.isPending ||
     researchFacility.isPending ||
     fetchPaper.isPending ||
     clearAssessments.isPending;
@@ -620,117 +616,141 @@ export default function ScanPage() {
         </div>
       )}
 
-      {/* Streaming Assessment Progress */}
-      {(assessProgress.isAssessing || assessProgress.completedPapers.length > 0) && (
+      {/* Assessment Queue Status */}
+      {queueStatus && (queueStatus.pending > 0 || queueStatus.processing > 0 || recentItems.length > 0) && (
         <div className="rounded-xl border border-accent/30 bg-accent/5 p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {assessProgress.isAssessing ? (
+              {queueStatus.processing > 0 ? (
                 <Loader2 className="h-5 w-5 animate-spin text-accent" />
+              ) : queueStatus.pending > 0 ? (
+                <Clock className="h-5 w-5 text-accent" />
               ) : (
                 <CheckCircle className="h-5 w-5 text-grade-a" />
               )}
               <span className="font-medium">
-                {assessProgress.isAssessing ? "Running AI Assessment..." : "Assessment Complete"}
+                {queueStatus.processing > 0 
+                  ? "Processing Assessment Queue..." 
+                  : queueStatus.pending > 0 
+                    ? "Queue Ready"
+                    : "Queue Complete"}
               </span>
             </div>
             <div className="flex items-center gap-4 text-sm">
-              <span className="text-muted-foreground">
-                {assessProgress.assessed} assessed
-              </span>
-              {assessProgress.flagged > 0 && (
-                <span className="text-grade-f font-medium">
-                  {assessProgress.flagged} flagged
+              <div className="flex items-center gap-1">
+                <span className={`px-2 py-0.5 rounded ${queueStatus.pending > 0 ? "bg-accent/20 text-accent" : "bg-muted text-muted-foreground"}`}>
+                  {queueStatus.pending} pending
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                  {queueStatus.completed} completed
+                </span>
+              </div>
+              {queueStatus.failed > 0 && (
+                <span className="px-2 py-0.5 rounded bg-destructive/20 text-destructive">
+                  {queueStatus.failed} failed
                 </span>
               )}
             </div>
           </div>
 
-          <div className="text-sm text-muted-foreground">
-            {assessProgress.currentMessage}
+          {/* Connection status */}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
+            {isConnected ? "Connected to queue" : "Reconnecting..."}
           </div>
 
           {/* Current paper being assessed */}
-          {assessProgress.isAssessing && assessProgress.currentPaper && (
+          {queueStatus.current && (
             <div className="rounded-lg border border-accent/20 bg-accent/10 p-3">
               <div className="flex items-center gap-2 mb-1">
                 <Loader2 className="h-4 w-4 animate-spin text-accent" />
                 <span className="text-sm font-medium text-accent">
-                  Analyzing ({assessProgress.progress})
+                  Analyzing...
                 </span>
               </div>
               <p className="text-sm text-muted-foreground truncate">
-                {assessProgress.currentPaper}
+                {queueStatus.current.paper_title}
               </p>
             </div>
           )}
 
-          {/* Completed papers list */}
-          {assessProgress.completedPapers.length > 0 && (
+          {/* Recent queue items */}
+          {recentItems.length > 0 && (
             <div className="space-y-2 max-h-64 overflow-y-auto">
-              {assessProgress.completedPapers.slice().reverse().map((paper) => (
+              {recentItems.map((item) => (
                 <div
-                  key={paper.paper_id}
+                  key={item.id}
                   className={`rounded-lg border p-3 transition-all ${
-                    paper.flagged
-                      ? "border-grade-f/30 bg-grade-f/5"
-                      : "border-border bg-card"
+                    item.status === "failed"
+                      ? "border-destructive/30 bg-destructive/5"
+                      : item.status === "processing"
+                        ? "border-accent/30 bg-accent/10"
+                        : item.result_flagged
+                          ? "border-grade-f/30 bg-grade-f/5"
+                          : "border-border bg-card"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate" title={paper.title}>
-                        {paper.title}
+                      <p className="text-sm font-medium truncate" title={item.paper_title || ""}>
+                        {item.paper_title || `Paper #${item.paper_id}`}
                       </p>
-                      {paper.concerns_summary && (
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                          {paper.concerns_summary}
+                      {item.status === "failed" && item.error_message && (
+                        <p className="text-xs text-destructive mt-1 truncate">
+                          {item.error_message}
                         </p>
-                      )}
-                      {paper.pathogens.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {paper.pathogens.slice(0, 3).map((pathogen, i) => (
-                            <span
-                              key={i}
-                              className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
-                            >
-                              {pathogen}
-                            </span>
-                          ))}
-                        </div>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span
-                        className={`text-xs font-bold px-2 py-1 rounded border ${getGradeColor(
-                          paper.risk_grade
-                        )}`}
-                      >
-                        {paper.risk_grade}
-                      </span>
-                      {paper.flagged && (
+                      {item.status === "pending" && (
+                        <span className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground">
+                          Pending
+                        </span>
+                      )}
+                      {item.status === "processing" && (
+                        <span className="text-xs px-2 py-1 rounded bg-accent/20 text-accent flex items-center gap-1">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Processing
+                        </span>
+                      )}
+                      {item.status === "completed" && item.result_grade && (
+                        <span
+                          className={`text-xs font-bold px-2 py-1 rounded border ${getGradeColor(
+                            item.result_grade
+                          )}`}
+                        >
+                          {item.result_grade}
+                        </span>
+                      )}
+                      {item.status === "failed" && (
+                        <span className="text-xs px-2 py-1 rounded bg-destructive/20 text-destructive">
+                          Failed
+                        </span>
+                      )}
+                      {item.result_flagged && (
                         <AlertCircle className="h-4 w-4 text-grade-f" />
                       )}
                     </div>
                   </div>
-                  {paper.flagged && paper.flag_reason && (
-                    <p className="text-xs text-grade-f mt-2">
-                      ⚠️ {paper.flag_reason}
-                    </p>
-                  )}
                 </div>
               ))}
             </div>
           )}
 
-          {!assessProgress.isAssessing && (
-            <button
-              onClick={() => setAssessProgress(initialAssessProgress)}
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              Dismiss
-            </button>
-          )}
+          {/* Actions */}
+          <div className="flex gap-2">
+            {queueStatus.completed > 0 || queueStatus.failed > 0 ? (
+              <button
+                onClick={() => clearQueue.mutate()}
+                disabled={clearQueue.isPending}
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                Clear completed
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 
@@ -828,24 +848,24 @@ export default function ScanPage() {
           </div>
         </button>
 
-        {/* Assess Papers - Now uses streaming */}
+        {/* Assess Papers - Add to Queue */}
         <button
-          onClick={startStreamingAssess}
+          onClick={() => addAllToQueue.mutate()}
           disabled={isAnyLoading}
           className="rounded-xl border border-accent/50 bg-accent/10 p-6 text-left hover:bg-accent/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <div className="flex items-center gap-4">
             <div className="rounded-lg bg-accent/20 p-3">
-              {assessProgress.isAssessing ? (
+              {addAllToQueue.isPending ? (
                 <Loader2 className="h-6 w-6 animate-spin text-accent" />
               ) : (
-                <Brain className="h-6 w-6 text-accent" />
+                <ListOrdered className="h-6 w-6 text-accent" />
               )}
             </div>
             <div>
-              <h3 className="font-medium text-accent">Assess Papers</h3>
+              <h3 className="font-medium text-accent">Queue Assessments</h3>
               <p className="text-sm text-muted-foreground">
-                Run AI biosecurity analysis with live progress
+                Add all unassessed papers to queue
               </p>
             </div>
           </div>

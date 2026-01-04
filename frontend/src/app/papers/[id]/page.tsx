@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { papersApi, assessmentsApi, scanApi } from "@/lib/api";
+import { papersApi, assessmentsApi, queueApi, QueueItem } from "@/lib/api";
 import { AssessmentDetail } from "@/components/AssessmentDetail";
 import { formatDate, parseAuthors, sourceLabel } from "@/lib/utils";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Brain, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, ExternalLink, ListOrdered, Loader2, RefreshCw, Clock, CheckCircle } from "lucide-react";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function PaperDetailPage({
   params,
@@ -15,7 +17,8 @@ export default function PaperDetailPage({
 }) {
   const paperId = parseInt(params.id);
   const queryClient = useQueryClient();
-  const [assessResult, setAssessResult] = useState<string | null>(null);
+  const [queueMessage, setQueueMessage] = useState<string | null>(null);
+  const [isInQueue, setIsInQueue] = useState(false);
 
   const { data: paper, isLoading: paperLoading } = useQuery({
     queryKey: ["paper", paperId],
@@ -27,19 +30,53 @@ export default function PaperDetailPage({
     queryFn: () => assessmentsApi.forPaper(paperId),
   });
 
-  const assessMutation = useMutation({
-    mutationFn: (force: boolean) => scanApi.assessPaper(paperId, force),
-    onSuccess: (data) => {
-      setAssessResult(data.message);
+  // Check if paper is in queue
+  const { data: queueItems } = useQuery({
+    queryKey: ["queue-items-for-paper", paperId],
+    queryFn: async () => {
+      const items = await queueApi.items(undefined, 100);
+      return items.filter(item => item.paper_id === paperId);
+    },
+    refetchInterval: isInQueue ? 2000 : false,
+  });
+
+  // Update isInQueue state
+  useEffect(() => {
+    const pendingOrProcessing = queueItems?.some(
+      item => item.status === "pending" || item.status === "processing"
+    );
+    setIsInQueue(!!pendingOrProcessing);
+    
+    // If assessment completed, refresh assessments
+    const completed = queueItems?.some(
+      item => item.status === "completed"
+    );
+    if (completed) {
       refetchAssessments();
       queryClient.invalidateQueries({ queryKey: ["paper", paperId] });
-      queryClient.invalidateQueries({ queryKey: ["assessments"] });
-      queryClient.invalidateQueries({ queryKey: ["flagged"] });
+    }
+  }, [queueItems, refetchAssessments, queryClient, paperId]);
+
+  // Add to queue mutation
+  const addToQueueMutation = useMutation({
+    mutationFn: () => queueApi.addPaper(paperId, 1), // Priority 1 = high priority
+    onSuccess: (data) => {
+      if (data.already_queued > 0) {
+        setQueueMessage("Paper is already in the assessment queue");
+      } else {
+        setQueueMessage("Paper added to assessment queue");
+        setIsInQueue(true);
+      }
+      queryClient.invalidateQueries({ queryKey: ["queue-items-for-paper", paperId] });
     },
     onError: (error) => {
-      setAssessResult(`Error: ${error}`);
+      setQueueMessage(`Error: ${error}`);
     },
   });
+
+  const currentQueueItem = queueItems?.find(
+    item => item.status === "pending" || item.status === "processing"
+  );
 
   const latestAssessment = assessments?.[0];
   const authors = paper ? parseAuthors(paper.authors) : [];
@@ -136,27 +173,52 @@ export default function PaperDetailPage({
         )}
       </div>
 
+      {/* Queue Status */}
+      {currentQueueItem && (
+        <div className="rounded-xl border border-accent/30 bg-accent/5 p-4">
+          <div className="flex items-center gap-3">
+            {currentQueueItem.status === "processing" ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin text-accent" />
+                <span className="text-sm font-medium text-accent">
+                  Assessment in progress...
+                </span>
+              </>
+            ) : (
+              <>
+                <Clock className="h-5 w-5 text-accent" />
+                <span className="text-sm font-medium text-accent">
+                  Queued for assessment
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Assessment */}
       {latestAssessment ? (
         <div className="rounded-xl border border-border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-medium">Biosecurity Assessment</h2>
             <button
-              onClick={() => assessMutation.mutate(true)}
-              disabled={assessMutation.isPending}
+              onClick={() => addToQueueMutation.mutate()}
+              disabled={addToQueueMutation.isPending || isInQueue}
               className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-1.5 text-sm font-medium hover:bg-muted/80 transition-colors disabled:opacity-50"
             >
-              {assessMutation.isPending ? (
+              {addToQueueMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
+              ) : isInQueue ? (
+                <Clock className="h-4 w-4" />
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              Re-assess
+              {isInQueue ? "In Queue" : "Re-assess"}
             </button>
           </div>
-          {assessResult && (
+          {queueMessage && (
             <div className="mb-4 p-3 rounded-lg bg-muted text-sm">
-              {assessResult}
+              {queueMessage}
             </div>
           )}
           <AssessmentDetail assessment={latestAssessment} />
@@ -168,24 +230,29 @@ export default function PaperDetailPage({
               This paper has not been assessed yet.
             </p>
             <button
-              onClick={() => assessMutation.mutate(false)}
-              disabled={assessMutation.isPending}
+              onClick={() => addToQueueMutation.mutate()}
+              disabled={addToQueueMutation.isPending || isInQueue}
               className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/80 transition-colors disabled:opacity-50"
             >
-              {assessMutation.isPending ? (
+              {addToQueueMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Assessing...
+                  Adding to queue...
+                </>
+              ) : isInQueue ? (
+                <>
+                  <Clock className="h-4 w-4" />
+                  In Queue
                 </>
               ) : (
                 <>
-                  <Brain className="h-4 w-4" />
-                  Assess Now
+                  <ListOrdered className="h-4 w-4" />
+                  Queue Assessment
                 </>
               )}
             </button>
-            {assessResult && (
-              <p className="text-sm text-muted-foreground">{assessResult}</p>
+            {queueMessage && (
+              <p className="text-sm text-muted-foreground">{queueMessage}</p>
             )}
           </div>
         </div>

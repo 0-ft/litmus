@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
 from .api import papers, assessments, facilities, scan, reference_assessments
+from .api import queue as queue_api
+from .queue_worker import queue_worker
 
 # Create FastAPI app
 app = FastAPI(
@@ -27,12 +29,16 @@ app.include_router(assessments.router, prefix="/api/assessments", tags=["assessm
 app.include_router(facilities.router, prefix="/api/facilities", tags=["facilities"])
 app.include_router(scan.router, prefix="/api/scan", tags=["scan"])
 app.include_router(reference_assessments.router, prefix="/api/reference", tags=["reference"])
+app.include_router(queue_api.router, prefix="/api/queue", tags=["queue"])
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup."""
     init_db()
+    
+    # Start the queue worker
+    queue_worker.start()
     
     # Optionally start scheduler (set ENABLE_SCHEDULER=true)
     import os
@@ -44,6 +50,9 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
+    # Stop the queue worker
+    queue_worker.stop()
+    
     import os
     if os.getenv("ENABLE_SCHEDULER", "false").lower() == "true":
         from .scheduler import stop_scheduler
