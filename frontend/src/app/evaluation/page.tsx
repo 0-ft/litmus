@@ -15,6 +15,8 @@ import {
   XCircle,
   MinusCircle,
   FileText,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 function ScoreComparisonBar({
@@ -74,32 +76,58 @@ function MetricCard({ label, value, suffix = "", color = "text-foreground" }: { 
   );
 }
 
-function ComparisonRow({ comparison }: { comparison: FullComparisonResponse["comparisons"][0] }) {
+function ComparisonRow({ 
+  comparison,
+  onEdit,
+  onDelete,
+}: { 
+  comparison: FullComparisonResponse["comparisons"][0];
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors text-left"
-      >
-        <div className="flex-1">
-          <Link 
-            href={`/papers/${comparison.paper_id}`}
-            className="font-medium hover:text-primary transition-colors"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {comparison.paper_title}
-          </Link>
-          <div className="flex gap-4 mt-1 text-sm text-muted-foreground">
-            <span>Overall: AI {comparison.overall.ai_score.toFixed(1)} vs Ref {comparison.overall.reference_score.toFixed(1)}</span>
-            <span className={comparison.bsl_match ? "text-green-500" : "text-red-500"}>
-              BSL: {comparison.bsl_match ? "✓ Match" : "✗ Mismatch"}
-            </span>
+      <div className="flex items-center">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex-1 flex items-center justify-between p-4 hover:bg-muted/50 transition-colors text-left"
+        >
+          <div className="flex-1">
+            <Link 
+              href={`/papers/${comparison.paper_id}`}
+              className="font-medium hover:text-primary transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {comparison.paper_title}
+            </Link>
+            <div className="flex gap-4 mt-1 text-sm text-muted-foreground">
+              <span>Overall: AI {comparison.overall.ai_score.toFixed(1)} vs Ref {comparison.overall.reference_score.toFixed(1)}</span>
+              <span className={comparison.bsl_match ? "text-green-500" : "text-red-500"}>
+                BSL: {comparison.bsl_match ? "✓ Match" : "✗ Mismatch"}
+              </span>
+            </div>
           </div>
+          {expanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+        </button>
+        <div className="flex gap-1 pr-4">
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            className="p-2 rounded-lg hover:bg-muted transition-colors"
+            title="Edit reference"
+          >
+            <Pencil className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="p-2 rounded-lg hover:bg-destructive/10 transition-colors"
+            title="Delete reference"
+          >
+            <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+          </button>
         </div>
-        {expanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-border p-4 bg-muted/30">
@@ -405,36 +433,50 @@ function ReferenceAssessmentForm({
   );
 }
 
-function CreateReferenceModal({ 
+function ReferenceModal({ 
   isOpen, 
-  onClose 
+  onClose,
+  editPaperId,
 }: { 
   isOpen: boolean; 
   onClose: () => void;
+  editPaperId?: number | null;  // If provided, edit mode for this paper
 }) {
   const [selectedPaperId, setSelectedPaperId] = useState<number | null>(null);
+  const isEditMode = !!editPaperId;
+  
+  // Use editPaperId if in edit mode, otherwise use selectedPaperId
+  const activePaperId = isEditMode ? editPaperId : selectedPaperId;
 
   const { data: papers } = useQuery({
     queryKey: ["papers-for-reference"],
     queryFn: () => papersApi.list(1, 100),
-    enabled: isOpen,
+    enabled: isOpen && !isEditMode,
   });
 
-  const { data: existingRef } = useQuery({
-    queryKey: ["reference", selectedPaperId],
-    queryFn: () => selectedPaperId ? referenceApi.forPaper(selectedPaperId) : null,
-    enabled: !!selectedPaperId,
+  const { data: existingRef, isLoading: refLoading } = useQuery({
+    queryKey: ["reference", activePaperId],
+    queryFn: () => activePaperId ? referenceApi.forPaper(activePaperId) : null,
+    enabled: !!activePaperId && isOpen,
     retry: false,
   });
+
+  // Reset selected paper when modal closes
+  const handleClose = () => {
+    setSelectedPaperId(null);
+    onClose();
+  };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-2xl rounded-xl bg-card border border-border p-6 m-4 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">Create Reference Assessment</h2>
+        <h2 className="text-lg font-semibold mb-4">
+          {isEditMode || existingRef ? "Edit Reference Assessment" : "Create Reference Assessment"}
+        </h2>
 
-        {!selectedPaperId ? (
+        {!activePaperId ? (
           <div>
             <label className="text-sm text-muted-foreground">Select a paper:</label>
             <select
@@ -450,28 +492,33 @@ function CreateReferenceModal({
               ))}
             </select>
           </div>
+        ) : refLoading ? (
+          <div className="text-center text-muted-foreground py-8">Loading...</div>
         ) : (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <span className="text-sm text-muted-foreground">Paper ID: {selectedPaperId}</span>
-              <button
-                onClick={() => setSelectedPaperId(null)}
-                className="text-sm text-primary hover:underline"
-              >
-                Change paper
-              </button>
+              <span className="text-sm text-muted-foreground">Paper ID: {activePaperId}</span>
+              {!isEditMode && (
+                <button
+                  onClick={() => setSelectedPaperId(null)}
+                  className="text-sm text-primary hover:underline"
+                >
+                  Change paper
+                </button>
+              )}
             </div>
             <ReferenceAssessmentForm
-              paperId={selectedPaperId}
+              key={`${activePaperId}-${existingRef?.id || 'new'}`}  // Force re-render when paper or ref changes
+              paperId={activePaperId}
               existingRef={existingRef || undefined}
-              onSave={onClose}
+              onSave={handleClose}
             />
           </div>
         )}
 
         <div className="mt-4 flex justify-end">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="px-4 py-2 rounded-lg bg-muted text-sm font-medium hover:bg-muted/80"
           >
             Cancel
@@ -483,7 +530,9 @@ function CreateReferenceModal({
 }
 
 export default function EvaluationPage() {
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editPaperId, setEditPaperId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
 
   const { data: references, isLoading: refsLoading } = useQuery({
     queryKey: ["references"],
@@ -494,6 +543,35 @@ export default function EvaluationPage() {
     queryKey: ["comparison"],
     queryFn: referenceApi.compare,
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (paperId: number) => referenceApi.delete(paperId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["references"] });
+      queryClient.invalidateQueries({ queryKey: ["comparison"] });
+    },
+  });
+
+  const handleEdit = (paperId: number) => {
+    setEditPaperId(paperId);
+    setShowModal(true);
+  };
+
+  const handleDelete = (paperId: number, paperTitle: string) => {
+    if (confirm(`Delete reference assessment for "${paperTitle.substring(0, 50)}..."?`)) {
+      deleteMutation.mutate(paperId);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setEditPaperId(null);
+  };
+
+  const handleAddNew = () => {
+    setEditPaperId(null);
+    setShowModal(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -509,7 +587,7 @@ export default function EvaluationPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={handleAddNew}
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           <Plus className="h-4 w-4" />
@@ -544,20 +622,43 @@ export default function EvaluationPage() {
         ) : (
           <div className="p-4 space-y-3">
             {comparison?.comparisons.map((comp) => (
-              <ComparisonRow key={comp.paper_id} comparison={comp} />
+              <ComparisonRow 
+                key={comp.paper_id} 
+                comparison={comp}
+                onEdit={() => handleEdit(comp.paper_id)}
+                onDelete={() => handleDelete(comp.paper_id, comp.paper_title)}
+              />
             ))}
             {/* References without AI assessment */}
             {references?.filter(ref => !comparison?.comparisons.find(c => c.paper_id === ref.paper_id)).map(ref => (
-              <div key={ref.id} className="border border-border rounded-lg p-4">
-                <Link 
-                  href={`/papers/${ref.paper_id}`}
-                  className="font-medium hover:text-primary transition-colors"
-                >
-                  {ref.paper_title}
-                </Link>
-                <div className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
-                  <MinusCircle className="h-4 w-4" />
-                  No AI assessment yet - run assessment to compare
+              <div key={ref.id} className="border border-border rounded-lg p-4 flex items-center justify-between">
+                <div>
+                  <Link 
+                    href={`/papers/${ref.paper_id}`}
+                    className="font-medium hover:text-primary transition-colors"
+                  >
+                    {ref.paper_title}
+                  </Link>
+                  <div className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+                    <MinusCircle className="h-4 w-4" />
+                    No AI assessment yet - run assessment to compare
+                  </div>
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => handleEdit(ref.paper_id)}
+                    className="p-2 rounded-lg hover:bg-muted transition-colors"
+                    title="Edit reference"
+                  >
+                    <Pencil className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(ref.paper_id, ref.paper_title || "")}
+                    className="p-2 rounded-lg hover:bg-destructive/10 transition-colors"
+                    title="Delete reference"
+                  >
+                    <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -565,10 +666,11 @@ export default function EvaluationPage() {
         )}
       </div>
 
-      {/* Create Modal */}
-      <CreateReferenceModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+      {/* Modal */}
+      <ReferenceModal
+        isOpen={showModal}
+        onClose={handleCloseModal}
+        editPaperId={editPaperId}
       />
     </div>
   );
