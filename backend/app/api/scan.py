@@ -259,62 +259,74 @@ async def fetch_single_paper(
             if settings.ncbi_api_key:
                 Entrez.api_key = settings.ncbi_api_key
             
-            # Fetch paper details
+            # Fetch paper details using Entrez.read() for proper StringElement handling
             handle = Entrez.efetch(db="pubmed", id=paper_id, rettype="xml", retmode="xml")
-            from xml.etree import ElementTree as ET
-            tree = ET.parse(handle)
+            records = Entrez.read(handle)
             handle.close()
             
-            article = tree.find(".//PubmedArticle")
-            if article is None:
+            if not records.get("PubmedArticle"):
                 raise HTTPException(status_code=404, detail=f"Paper not found on PubMed: {paper_id}")
             
-            # Extract title
-            title_elem = article.find(".//ArticleTitle")
-            title = title_elem.text if title_elem is not None else "Unknown Title"
+            record = records["PubmedArticle"][0]
+            article = record.get("MedlineCitation", {}).get("Article", {})
             
-            # Extract abstract
-            abstract_parts = article.findall(".//AbstractText")
-            abstract = " ".join([p.text or "" for p in abstract_parts])
+            # Extract title
+            title = article.get("ArticleTitle", "Unknown Title")
+            
+            # Extract abstract - use str() to handle StringElement properly
+            abstract_parts = article.get("Abstract", {}).get("AbstractText", [])
+            if abstract_parts:
+                if isinstance(abstract_parts, list):
+                    abstract = " ".join(str(p) for p in abstract_parts)
+                else:
+                    abstract = str(abstract_parts)
+            else:
+                abstract = None
             
             # Extract authors and affiliations
-            author_list = article.findall(".//Author")
+            author_list = article.get("AuthorList", [])
             authors = []
             affiliations = set()
             for author in author_list:
-                lastname = author.find("LastName")
-                forename = author.find("ForeName")
-                if lastname is not None:
-                    name = lastname.text
-                    if forename is not None:
-                        name = f"{forename.text} {name}"
-                    authors.append(name)
+                last = author.get("LastName", "")
+                first = author.get("ForeName", "")
+                if last:
+                    authors.append(f"{first} {last}".strip())
                 
                 # Extract affiliations
-                for aff in author.findall(".//Affiliation"):
-                    if aff.text:
-                        affiliations.add(aff.text)
+                for aff in author.get("AffiliationInfo", []):
+                    aff_text = aff.get("Affiliation", "")
+                    if aff_text:
+                        affiliations.add(aff_text)
             
             affiliations_json = json.dumps(list(affiliations)) if affiliations else None
             
             # Extract date
             from datetime import datetime
-            pub_date = article.find(".//PubDate")
-            published_date = None
-            if pub_date is not None:
-                year = pub_date.find("Year")
-                month = pub_date.find("Month")
-                day = pub_date.find("Day")
-                if year is not None:
-                    try:
-                        date_str = year.text
-                        if month is not None:
-                            date_str += f"-{month.text}"
-                            if day is not None:
-                                date_str += f"-{day.text}"
-                        published_date = datetime.strptime(date_str, "%Y-%m-%d" if day else ("%Y-%m" if month else "%Y"))
-                    except (ValueError, TypeError):
-                        pass
+            pub_date = None
+            date_info = article.get("ArticleDate", [])
+            if date_info:
+                date_info = date_info[0]
+                try:
+                    year = int(date_info.get("Year", 0))
+                    month = int(date_info.get("Month", 1))
+                    day = int(date_info.get("Day", 1))
+                    pub_date = datetime(year, month, day)
+                except (ValueError, TypeError):
+                    pass
+            
+            if not pub_date:
+                journal_info = article.get("Journal", {}).get("JournalIssue", {}).get("PubDate", {})
+                try:
+                    year = int(journal_info.get("Year", 0))
+                    if year:
+                        pub_date = datetime(year, 1, 1)
+                except (ValueError, TypeError):
+                    pass
+            
+            # Extract categories from MeSH terms
+            mesh_list = record.get("MedlineCitation", {}).get("MeshHeadingList", [])
+            categories = [str(mesh.get("DescriptorName", "")) for mesh in mesh_list[:10] if mesh.get("DescriptorName")]
             
             paper = Paper(
                 source="pubmed",
@@ -325,8 +337,8 @@ async def fetch_single_paper(
                 abstract=abstract,
                 url=f"https://pubmed.ncbi.nlm.nih.gov/{paper_id}/",
                 pdf_url=None,
-                published_date=published_date,
-                categories=json.dumps([]),
+                published_date=pub_date,
+                categories=json.dumps(categories),
                 processed=False,
             )
         else:
