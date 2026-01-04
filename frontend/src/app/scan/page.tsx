@@ -113,7 +113,8 @@ export default function ScanPage() {
     });
 
     try {
-      const response = await fetch(`${API_BASE}/api/scan/assess/stream?limit=10`);
+      // Assess all unprocessed papers (limit=500 is effectively "all")
+      const response = await fetch(`${API_BASE}/api/scan/assess/stream?limit=500`);
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 

@@ -179,7 +179,7 @@ export const scanApi = {
   all: (maxResultsPerSource = 50) =>
     fetchApi<{ message: string; papers_fetched: number }>(`/api/scan/all?max_results_per_source=${maxResultsPerSource}`, { method: "POST" }),
   
-  assess: (limit = 10) =>
+  assess: (limit = 500) =>
     fetchApi<{ message: string; papers_assessed: number; flagged: number }>(`/api/scan/assess?limit=${limit}`, { method: "POST" }),
   
   researchFacility: (facilityName: string) =>

@@ -733,7 +733,7 @@ async def scan_all_sources_stream(max_results_per_source: int = 30):
 
 @router.post("/assess", response_model=AssessResponse)
 async def assess_papers(
-    limit: int = 10,
+    limit: int = 500,
     db: Session = Depends(get_db),
 ):
     """Assess unprocessed papers for biosecurity risks."""
@@ -854,7 +854,7 @@ async def _assess_streaming(limit: int) -> AsyncGenerator[str, None]:
 
 
 @router.get("/assess/stream")
-async def assess_papers_stream(limit: int = 10):
+async def assess_papers_stream(limit: int = 500):
     """Assess papers with real-time SSE progress updates."""
     return StreamingResponse(
         _assess_streaming(limit),
