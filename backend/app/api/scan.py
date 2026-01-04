@@ -438,11 +438,11 @@ async def assess_single_paper(
         paper.processed = False
         db.commit()
     
-    # Assess the paper
+    # Assess the paper - run in thread pool to avoid blocking event loop
     try:
         logger.info(f"Starting assessment for paper {paper_id}: {paper.title[:50]}...")
         assessor = BiosecurityAssessor(db)
-        assessment = assessor.assess_paper(paper)
+        assessment = await asyncio.to_thread(assessor.assess_paper, paper)
         
         if not assessment:
             raise HTTPException(
@@ -488,7 +488,8 @@ async def scan_arxiv(
     try:
         scraper = ArxivScraper(db)
         logger.info("ArxivScraper initialized, starting fetch...")
-        count = scraper.fetch_and_store(max_results=max_results, use_terms=use_terms)
+        # Run in thread pool to avoid blocking event loop
+        count = await asyncio.to_thread(scraper.fetch_and_store, max_results=max_results, use_terms=use_terms)
         logger.info(f"arXiv scan complete: {count} papers fetched")
         
         return ScanResponse(
@@ -511,7 +512,8 @@ async def scan_biorxiv(
     logger.info(f"Starting bioRxiv scan: max_results={max_results}, days_back={days_back}")
     try:
         scraper = BiorxivScraper(db)
-        count = scraper.fetch_and_store(max_results=max_results, days_back=days_back)
+        # Run in thread pool to avoid blocking event loop
+        count = await asyncio.to_thread(scraper.fetch_and_store, max_results=max_results, days_back=days_back)
         logger.info(f"bioRxiv scan complete: {count} papers fetched")
         
         return ScanResponse(
@@ -534,7 +536,8 @@ async def scan_pubmed(
     logger.info(f"Starting PubMed scan: max_results={max_results}, days_back={days_back}")
     try:
         scraper = PubmedScraper(db)
-        count = scraper.fetch_and_store(max_results=max_results, days_back=days_back)
+        # Run in thread pool to avoid blocking event loop
+        count = await asyncio.to_thread(scraper.fetch_and_store, max_results=max_results, days_back=days_back)
         logger.info(f"PubMed scan complete: {count} papers fetched")
         
         return ScanResponse(
@@ -631,8 +634,8 @@ async def _scan_all_streaming(max_results_per_source: int) -> AsyncGenerator[str
         await asyncio.sleep(0.1)
         try:
             arxiv_scraper = ArxivScraper(db)
-            # Fetch papers without term search for speed
-            papers = arxiv_scraper.search_by_categories(max_results=max_results_per_source)
+            # Fetch papers without term search for speed - run in thread to avoid blocking
+            papers = await asyncio.to_thread(arxiv_scraper.search_by_categories, max_results=max_results_per_source)
             for paper in papers:
                 db.add(paper)
             db.commit()
@@ -652,7 +655,8 @@ async def _scan_all_streaming(max_results_per_source: int) -> AsyncGenerator[str
         await asyncio.sleep(0.1)
         try:
             biorxiv_scraper = BiorxivScraper(db)
-            papers = biorxiv_scraper.fetch_recent(server="biorxiv", max_results=max_results_per_source)
+            # Run in thread to avoid blocking event loop
+            papers = await asyncio.to_thread(biorxiv_scraper.fetch_recent, server="biorxiv", max_results=max_results_per_source)
             for paper in papers:
                 db.add(paper)
             db.commit()
@@ -672,7 +676,8 @@ async def _scan_all_streaming(max_results_per_source: int) -> AsyncGenerator[str
         await asyncio.sleep(0.1)
         try:
             medrxiv_scraper = BiorxivScraper(db)
-            papers = medrxiv_scraper.fetch_recent(server="medrxiv", max_results=max_results_per_source)
+            # Run in thread to avoid blocking event loop
+            papers = await asyncio.to_thread(medrxiv_scraper.fetch_recent, server="medrxiv", max_results=max_results_per_source)
             for paper in papers:
                 db.add(paper)
             db.commit()
@@ -692,7 +697,8 @@ async def _scan_all_streaming(max_results_per_source: int) -> AsyncGenerator[str
         await asyncio.sleep(0.1)
         try:
             pubmed_scraper = PubmedScraper(db)
-            count = pubmed_scraper.fetch_and_store(max_results=max_results_per_source)
+            # Run in thread to avoid blocking event loop
+            count = await asyncio.to_thread(pubmed_scraper.fetch_and_store, max_results=max_results_per_source)
             total += count
             yield send_event("source_complete", {
                 "source": "pubmed",
@@ -798,8 +804,8 @@ async def _assess_streaming(limit: int) -> AsyncGenerator[str, None]:
             await asyncio.sleep(0.1)
             
             try:
-                # Assess the paper
-                assessment = assessor.assess_paper(paper)
+                # Assess the paper - run in thread pool to avoid blocking event loop
+                assessment = await asyncio.to_thread(assessor.assess_paper, paper)
                 
                 if assessment:
                     assessed_count += 1
@@ -874,7 +880,8 @@ async def research_facility_endpoint(
         )
     
     researcher = FacilityResearcher(db)
-    result = researcher.research_facility(facility_name)
+    # Run in thread pool to avoid blocking event loop
+    result = await asyncio.to_thread(researcher.research_facility, facility_name)
     
     if result:
         return FacilityResearchResponse(
