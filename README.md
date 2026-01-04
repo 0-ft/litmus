@@ -168,7 +168,7 @@ biomon/
 
 ## Risk Assessment Criteria
 
-Papers are evaluated on four dimensions (0-100 each):
+Papers are evaluated on four dimensions (0-10 each):
 
 1. **Pathogen Risk**: Identifies dangerous pathogens from WHO priority lists and CDC Select Agents
 2. **Gain-of-Function**: Detects research enhancing transmissibility, virulence, or host range
@@ -176,13 +176,13 @@ Papers are evaluated on four dimensions (0-100 each):
 4. **Dual-Use**: Evaluates potential for methodology misuse
 
 The overall score is a weighted average, converted to letter grades:
-- A (0-19): Minimal concern
-- B (20-39): Low concern
-- C (40-59): Moderate concern
-- D (60-79): High concern
-- F (80-100): Critical concern
+- A (0-2): Minimal concern
+- B (2-4): Low concern
+- C (4-6): Moderate concern
+- D (6-8): High concern
+- F (8-10): Critical concern
 
-Papers scoring above the threshold (default 70) are automatically flagged for human review.
+Papers scoring above the threshold (default 7) are automatically flagged for human review.
 
 ## Facility Research
 

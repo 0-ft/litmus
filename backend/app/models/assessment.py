@@ -17,7 +17,7 @@ class Assessment(Base):
     # Risk grade (A=lowest risk through F=highest concern)
     risk_grade = Column(String(1), nullable=False, index=True)
     
-    # Individual scores (0-100)
+    # Individual scores (0-10)
     overall_score = Column(Float, nullable=False, index=True)
     pathogen_score = Column(Float, nullable=False)
     gof_score = Column(Float, nullable=False)  # Gain-of-function
@@ -55,14 +55,14 @@ class Assessment(Base):
     
     @staticmethod
     def score_to_grade(score: float) -> str:
-        """Convert numeric score to letter grade."""
-        if score < 20:
+        """Convert numeric score (0-10) to letter grade."""
+        if score < 2:
             return "A"
-        elif score < 40:
+        elif score < 4:
             return "B"
-        elif score < 60:
+        elif score < 6:
             return "C"
-        elif score < 80:
+        elif score < 8:
             return "D"
         else:
             return "F"

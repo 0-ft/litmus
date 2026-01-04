@@ -33,7 +33,7 @@ export function AssessmentDetail({ assessment }: AssessmentDetailProps) {
               Risk Grade: {assessment.risk_grade}
             </h2>
             <p className="text-muted-foreground">
-              Overall Score: {assessment.overall_score.toFixed(1)} / 100
+              Overall Score: {assessment.overall_score.toFixed(1)} / 10
             </p>
           </div>
         </div>

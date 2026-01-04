@@ -44,7 +44,7 @@ interface ScoreBarProps {
   maxScore?: number;
 }
 
-export function ScoreBar({ label, score, maxScore = 100 }: ScoreBarProps) {
+export function ScoreBar({ label, score, maxScore = 10 }: ScoreBarProps) {
   const percentage = (score / maxScore) * 100;
   
   const getBarColor = (score: number) => {

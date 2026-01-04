@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     scan_interval_hours: int = 24
     max_papers_per_scan: int = 100
     
-    # Risk thresholds
-    high_risk_threshold: int = 70  # Papers scoring above this get flagged
+    # Risk thresholds (0-10 scale)
+    high_risk_threshold: float = 7.0  # Papers scoring above this get flagged
     
     # LLM Configuration
     llm_provider: str = "anthropic"  # "anthropic" or "openrouter"

@@ -45,12 +45,12 @@ Evaluate research papers for potential biosecurity concerns across these dimensi
 
 Be thorough but balanced. Most pathogen research is legitimate and beneficial. Focus on identifying genuinely concerning elements that warrant expert human review.
 
-Score interpretation (0-100 scale):
-- 0-20: Minimal concern - routine research
-- 21-40: Low concern - standard pathogen work with appropriate safeguards
-- 41-60: Moderate concern - warrants routine biosafety review
-- 61-80: High concern - should be prioritized for expert review
-- 81-100: Critical concern - requires immediate expert attention"""
+Score interpretation (0-10 scale):
+- 0-2: Minimal concern - routine research
+- 2-4: Low concern - standard pathogen work with appropriate safeguards
+- 4-6: Moderate concern - warrants routine biosafety review
+- 6-8: High concern - should be prioritized for expert review
+- 8-10: Critical concern - requires immediate expert attention"""
 
 
 ASSESSMENT_USER_PROMPT = """Please analyze this publicly-published research paper to help our biosecurity monitoring team identify if it warrants expert human review.
@@ -93,7 +93,7 @@ ASSESSMENT_SCHEMA = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer"},
+                "score": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Risk score from 0-10"},
                 "pathogens_identified": {"type": "array", "items": {"type": "string"}},
                 "rationale": {"type": "string"}
             },
@@ -103,7 +103,7 @@ ASSESSMENT_SCHEMA = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer"},
+                "score": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Risk score from 0-10"},
                 "indicators_found": {"type": "array", "items": {"type": "string"}},
                 "rationale": {"type": "string"}
             },
@@ -113,7 +113,7 @@ ASSESSMENT_SCHEMA = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer"},
+                "score": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Risk score from 0-10"},
                 "stated_bsl": {
                     "type": "string",
                     "description": "The BSL level where research was ACTUALLY CONDUCTED, or 'Unknown' if not stated"
@@ -142,7 +142,7 @@ ASSESSMENT_SCHEMA = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "score": {"type": "integer"},
+                "score": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Risk score from 0-10"},
                 "concerns": {"type": "array", "items": {"type": "string"}},
                 "rationale": {"type": "string"}
             },
@@ -367,7 +367,7 @@ class BiosecurityAssessor:
                 assessment = Assessment(
                     paper_id=paper.id,
                     risk_grade="F",  # Flag as needing manual review
-                    overall_score=100,  # Max score to ensure visibility
+                    overall_score=10,  # Max score to ensure visibility
                     pathogen_score=0,
                     gof_score=0,
                     containment_score=0,
