@@ -14,6 +14,7 @@ from ..scrapers import ArxivScraper, BiorxivScraper, PubmedScraper
 from ..analysis import BiosecurityAssessor
 from ..research import FacilityResearcher
 from ..config import settings
+from ..models import Assessment, Paper
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -898,4 +899,37 @@ async def research_facility_endpoint(
             facility_name=facility_name,
             found=False,
         )
+
+
+class ClearAssessmentsResponse(BaseModel):
+    """Response for clearing assessments."""
+    message: str
+    assessments_deleted: int
+
+
+@router.delete("/assessments", response_model=ClearAssessmentsResponse)
+async def clear_all_assessments(db: Session = Depends(get_db)):
+    """Delete all assessments from the database and reset papers to unprocessed."""
+    try:
+        # Count assessments before deletion
+        count = db.query(Assessment).count()
+        
+        # Delete all assessments
+        db.query(Assessment).delete()
+        
+        # Reset all papers to unprocessed
+        db.query(Paper).update({Paper.processed: False})
+        
+        db.commit()
+        
+        logger.info(f"Cleared {count} assessments from database")
+        
+        return ClearAssessmentsResponse(
+            message=f"Successfully deleted {count} assessments",
+            assessments_deleted=count,
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error clearing assessments: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear assessments: {str(e)}")
 

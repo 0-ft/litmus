@@ -304,6 +304,11 @@ export const scanApi = {
       pathogens?: string[];
       already_assessed: boolean;
     }>(`/api/scan/assess-paper/${paperId}?force=${force}`, { method: "POST" }),
+  
+  clearAssessments: () =>
+    fetchApi<{ message: string; assessments_deleted: number }>(`/api/scan/assessments`, {
+      method: "DELETE",
+    }),
 };
 
 // Reference Assessments API

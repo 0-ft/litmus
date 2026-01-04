@@ -14,6 +14,7 @@ import {
   Circle,
   XCircle,
   Link,
+  Trash2,
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -450,6 +451,38 @@ export default function ScanPage() {
     },
   });
 
+  const clearAssessments = useMutation({
+    mutationFn: () => scanApi.clearAssessments(),
+    onSuccess: (data) => {
+      addResult({
+        success: true,
+        message: data.message,
+        count: data.assessments_deleted,
+      });
+      // Reset the assessment progress display
+      setAssessProgress(initialAssessProgress);
+      // Invalidate all related queries
+      queryClient.invalidateQueries({ queryKey: ["assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["assessment-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["flagged"] });
+      queryClient.invalidateQueries({ queryKey: ["papers"] });
+      queryClient.invalidateQueries({ queryKey: ["paper-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["comparison"] });
+    },
+    onError: (error) => {
+      addResult({
+        success: false,
+        message: `Failed to clear assessments: ${error}`,
+      });
+    },
+  });
+
+  const handleClearAssessments = () => {
+    if (confirm("Are you sure you want to delete ALL assessments? This cannot be undone.")) {
+      clearAssessments.mutate();
+    }
+  };
+
   const isAnyLoading =
     scanArxiv.isPending ||
     scanBiorxiv.isPending ||
@@ -458,7 +491,8 @@ export default function ScanPage() {
     assessProgress.isAssessing ||
     assessPapers.isPending ||
     researchFacility.isPending ||
-    fetchPaper.isPending;
+    fetchPaper.isPending ||
+    clearAssessments.isPending;
 
   const SourceStatusIcon = ({ status }: { status: SourceProgress["status"] }) => {
     switch (status) {
@@ -812,6 +846,29 @@ export default function ScanPage() {
               <h3 className="font-medium text-accent">Assess Papers</h3>
               <p className="text-sm text-muted-foreground">
                 Run AI biosecurity analysis with live progress
+              </p>
+            </div>
+          </div>
+        </button>
+
+        {/* Clear Assessments */}
+        <button
+          onClick={handleClearAssessments}
+          disabled={isAnyLoading}
+          className="rounded-xl border border-destructive/50 bg-destructive/10 p-6 text-left hover:bg-destructive/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <div className="flex items-center gap-4">
+            <div className="rounded-lg bg-destructive/20 p-3">
+              {clearAssessments.isPending ? (
+                <Loader2 className="h-6 w-6 animate-spin text-destructive" />
+              ) : (
+                <Trash2 className="h-6 w-6 text-destructive" />
+              )}
+            </div>
+            <div>
+              <h3 className="font-medium text-destructive">Clear Assessments</h3>
+              <p className="text-sm text-muted-foreground">
+                Delete all assessments from database
               </p>
             </div>
           </div>
